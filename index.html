@@ -159,6 +159,50 @@
       padding: 1rem;
     }
 
+    #openNowFilter {
+      width: 100%;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    #openNowBtn {
+      background: white;
+      color: #6b7280;
+      border: 2px solid #d1d5db;
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    #openNowBtn.active {
+      background: #10b981;
+      color: white;
+      border-color: #10b981;
+    }
+
+    #openNowBtn::before {
+      content: '○';
+      font-size: 1rem;
+    }
+
+    #openNowBtn.active::before {
+      content: '●';
+    }
+
+    #categoryFilters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      width: 100%;
+    }
+
     .filter-btn {
       padding: 0.5rem 0.75rem;
       border: none;
@@ -401,7 +445,12 @@
   </div>
   
   <div id="filtersPanel">
-    <div id="filters"></div>
+    <div id="filters">
+      <div id="openNowFilter">
+        <button id="openNowBtn">Open Now</button>
+      </div>
+      <div id="categoryFilters"></div>
+    </div>
   </div>
 
   <div id="locations">
@@ -452,7 +501,8 @@
     let userLocationMarker = null;
     let locations = [];
     let filters = {};
-    
+    let openNowFilter = false;
+
     Object.keys(CATEGORY_COLORS).forEach(cat => filters[cat] = true);
     
     const headers = {
@@ -610,11 +660,24 @@
       updateLocationsList();
     }
     
+    function isOpenNow(location) {
+      // TODO: Add hours data to locations in database
+      // For now, return true for all locations
+      // Future: Parse location.hours and check against current time
+      return true;
+    }
+
     function updateMap() {
       markers.forEach(m => map.removeLayer(m));
       markers = [];
-      
-      const filtered = locations.filter(loc => filters[loc.category]);
+
+      let filtered = locations.filter(loc => filters[loc.category]);
+
+      // Apply Open Now filter if enabled
+      if (openNowFilter) {
+        filtered = filtered.filter(loc => isOpenNow(loc));
+      }
+
       filtered.forEach(loc => {
         const color = CATEGORY_COLORS[loc.category] || CATEGORY_COLORS.other;
         const icon = L.divIcon({
@@ -641,8 +704,13 @@
     
     function updateLocationsList() {
       const list = document.getElementById('locationsList');
-      const filtered = locations.filter(loc => filters[loc.category]);
-      
+      let filtered = locations.filter(loc => filters[loc.category]);
+
+      // Apply Open Now filter if enabled
+      if (openNowFilter) {
+        filtered = filtered.filter(loc => isOpenNow(loc));
+      }
+
       list.innerHTML = filtered.map(loc => `
         <div class="location-card" style="border-left-color: ${CATEGORY_COLORS[loc.category]}">
           <h3>${loc.name}</h3>
@@ -659,13 +727,13 @@
     }
     
     function createFilters() {
-      const container = document.getElementById('filters');
+      const container = document.getElementById('categoryFilters');
       container.innerHTML = Object.keys(CATEGORY_COLORS).map(cat => `
         <button class="filter-btn" id="filter-${cat}" style="background-color: ${CATEGORY_COLORS[cat]}; color: white;">
           ${cat}
         </button>
       `).join('');
-      
+
       Object.keys(CATEGORY_COLORS).forEach(cat => {
         document.getElementById(`filter-${cat}`).onclick = () => {
           filters[cat] = !filters[cat];
@@ -678,6 +746,18 @@
           updateUI();
         };
       });
+
+      // Open Now filter
+      document.getElementById('openNowBtn').onclick = () => {
+        openNowFilter = !openNowFilter;
+        const btn = document.getElementById('openNowBtn');
+        if (openNowFilter) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+        updateUI();
+      };
     }
     
     window.confirmDelete = (id, name) => {
