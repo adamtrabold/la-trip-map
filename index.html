@@ -10,10 +10,15 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow-x: hidden;
+      overflow: hidden;
+      height: 100vh;
     }
-    
+
     #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
       background: #2563eb;
       color: white;
       padding: 1rem;
@@ -21,11 +26,12 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      z-index: 1001;
     }
     
     #header-left h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
     #header-left p { font-size: 0.875rem; opacity: 0.9; }
-    
+
     #addBtnHeader {
       background: white;
       border: 2px solid white;
@@ -34,12 +40,14 @@
       height: 40px;
       border-radius: 50%;
       font-size: 1.5rem;
+      line-height: 1;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       transition: all 0.2s;
       font-weight: bold;
+      padding: 0;
     }
 
     #addBtnHeader:active {
@@ -52,12 +60,27 @@
       border-left: 4px solid #ef4444;
       color: #991b1b;
       padding: 1rem;
-      margin: 1rem;
+      margin: 1rem 1rem 0 1rem;
       display: none;
+      position: fixed;
+      top: 84px;
+      left: 0;
+      right: 0;
+      z-index: 1002;
     }
-    
+
     #error.show { display: block; }
-    
+
+    #mainContent {
+      position: fixed;
+      top: 84px;
+      left: 0;
+      right: 0;
+      bottom: 300px;
+      overflow: hidden;
+      transition: bottom 0.3s ease;
+    }
+
     #controls {
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
@@ -95,12 +118,32 @@
       cursor: pointer;
     }
     
+    #filtersPanel {
+      position: fixed;
+      bottom: 300px;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid #e5e7eb;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      z-index: 999;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+
+    #filtersPanel.visible {
+      transform: translateY(0);
+    }
+
     #filters {
       display: flex;
       flex-wrap: wrap;
       gap: 0.5rem;
+      padding: 1rem;
     }
-    
+
     .filter-btn {
       padding: 0.5rem 0.75rem;
       border: none;
@@ -111,18 +154,14 @@
       transition: opacity 0.2s;
     }
     
-    #mapContainer {
-      position: relative;
-    }
-
     #map {
-      height: 400px;
+      height: calc(100vh - 84px - 300px);
       width: 100%;
       transition: height 0.3s ease;
     }
 
     #map.expanded {
-      height: calc(100vh - 240px);
+      height: calc(100vh - 84px - 60px);
     }
 
     #locations {
@@ -131,19 +170,26 @@
       left: 0;
       right: 0;
       height: 300px;
-      overflow-y: auto;
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
       padding: 1rem;
       z-index: 1000;
       transition: height 0.3s ease, padding 0.3s ease;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
     }
 
     #locations.collapsed {
       height: 60px !important;
       padding: 0.75rem 1rem;
       overflow: hidden;
+    }
+
+    #locationsList {
+      overflow-y: auto;
+      flex: 1;
+      margin-top: 0.5rem;
     }
 
     #locations.collapsed #locationsList {
@@ -154,8 +200,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 0.5rem;
       gap: 0.5rem;
+      flex-shrink: 0;
     }
 
     #locationsHeader h2 {
@@ -185,6 +231,32 @@
 
     #collapseBtn.collapsed {
       transform: rotate(-180deg);
+    }
+
+    #toggleFiltersBtn {
+      background: #e5e7eb;
+      border: none;
+      color: #6b7280;
+      width: 36px;
+      height: 36px;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      flex-shrink: 0;
+    }
+
+    #toggleFiltersBtn:active {
+      background: #d1d5db;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    #toggleFiltersBtn.active {
+      background: #3b82f6;
+      color: white;
     }
 
     #centerMeBtn {
@@ -274,35 +346,49 @@
   <div id="error">
     <p id="errorText"></p>
   </div>
-  
-  <div id="controls">
-    <div id="addForm">
-      <input type="text" id="nameInput" placeholder="Name" required>
-      <input type="text" id="addressInput" placeholder="Address in Los Angeles" required>
-      <select id="categoryInput">
-        <option value="restaurant">restaurant</option>
-        <option value="cafe">cafe</option>
-        <option value="bar">bar</option>
-        <option value="attraction">attraction</option>
-        <option value="nature">nature</option>
-        <option value="shopping">shopping</option>
-        <option value="area">area</option>
-        <option value="hotel">hotel</option>
-        <option value="other">other</option>
-      </select>
-      <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
-      <button id="submitBtn">Add Location</button>
+
+  <div id="mainContent">
+    <div id="controls">
+      <div id="addForm">
+        <input type="text" id="nameInput" placeholder="Name" required>
+        <input type="text" id="addressInput" placeholder="Address in Los Angeles" required>
+        <select id="categoryInput">
+          <option value="restaurant">restaurant</option>
+          <option value="cafe">cafe</option>
+          <option value="bar">bar</option>
+          <option value="attraction">attraction</option>
+          <option value="nature">nature</option>
+          <option value="shopping">shopping</option>
+          <option value="area">area</option>
+          <option value="hotel">hotel</option>
+          <option value="other">other</option>
+        </select>
+        <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
+        <button id="submitBtn">Add Location</button>
+      </div>
     </div>
-    
-    <div id="filters"></div>
+
+    <div id="map"></div>
   </div>
   
-  <div id="map"></div>
-  
+  <div id="filtersPanel">
+    <div id="filters"></div>
+  </div>
+
   <div id="locations">
     <div id="locationsHeader">
       <button id="collapseBtn">▼</button>
       <h2>All Locations</h2>
+      <button id="toggleFiltersBtn" title="Toggle category filters">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="4" y1="6" x2="20" y2="6"/>
+          <line x1="4" y1="12" x2="20" y2="12"/>
+          <line x1="4" y1="18" x2="20" y2="18"/>
+          <circle cx="8" cy="6" r="2" fill="currentColor"/>
+          <circle cx="16" cy="12" r="2" fill="currentColor"/>
+          <circle cx="12" cy="18" r="2" fill="currentColor"/>
+        </svg>
+      </button>
       <button id="centerMeBtn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <circle cx="12" cy="12" r="3"/>
@@ -572,13 +658,29 @@
       form.classList.toggle('show');
     };
 
+    document.getElementById('toggleFiltersBtn').onclick = () => {
+      const filtersPanel = document.getElementById('filtersPanel');
+      const toggleBtn = document.getElementById('toggleFiltersBtn');
+      filtersPanel.classList.toggle('visible');
+      toggleBtn.classList.toggle('active');
+    };
+
     document.getElementById('collapseBtn').onclick = () => {
       const locations = document.getElementById('locations');
       const collapseBtn = document.getElementById('collapseBtn');
       const mapElement = document.getElementById('map');
+      const mainContent = document.getElementById('mainContent');
+
       locations.classList.toggle('collapsed');
       collapseBtn.classList.toggle('collapsed');
       mapElement.classList.toggle('expanded');
+
+      // Adjust mainContent bottom to match location panel height
+      if (locations.classList.contains('collapsed')) {
+        mainContent.style.bottom = '60px';
+      } else {
+        mainContent.style.bottom = '300px';
+      }
 
       // Force Leaflet to redraw map after resize
       setTimeout(() => {
