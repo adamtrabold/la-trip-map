@@ -26,36 +26,6 @@
     #header-left h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
     #header-left p { font-size: 0.875rem; opacity: 0.9; }
 
-    #header-right {
-      display: flex;
-      gap: 0.5rem;
-      align-items: center;
-    }
-
-    #toggleFiltersBtn {
-      background: rgba(255, 255, 255, 0.2);
-      border: 2px solid rgba(255, 255, 255, 0.5);
-      color: white;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-    }
-
-    #toggleFiltersBtn:active {
-      background: rgba(255, 255, 255, 0.3);
-      transform: scale(0.95);
-    }
-
-    #toggleFiltersBtn.active {
-      background: rgba(255, 255, 255, 0.3);
-      border-color: white;
-    }
-
     #addBtnHeader {
       background: white;
       border: 2px solid white;
@@ -94,6 +64,7 @@
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
       background: white;
+      margin-bottom: 300px;
     }
     
     #addForm {
@@ -127,22 +98,32 @@
       cursor: pointer;
     }
     
+    #filtersPanel {
+      position: fixed;
+      bottom: 300px;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid #e5e7eb;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      z-index: 999;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+
+    #filtersPanel.visible {
+      transform: translateY(0);
+    }
+
     #filters {
       display: flex;
       flex-wrap: wrap;
       gap: 0.5rem;
-      max-height: 200px;
-      overflow: hidden;
-      transition: max-height 0.3s ease, opacity 0.3s ease;
-      opacity: 1;
+      padding: 1rem;
     }
 
-    #filters.hidden {
-      max-height: 0;
-      opacity: 0;
-      margin: 0;
-    }
-    
     .filter-btn {
       padding: 0.5rem 0.75rem;
       border: none;
@@ -229,6 +210,32 @@
       transform: rotate(-180deg);
     }
 
+    #toggleFiltersBtn {
+      background: #e5e7eb;
+      border: none;
+      color: #6b7280;
+      width: 36px;
+      height: 36px;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      flex-shrink: 0;
+    }
+
+    #toggleFiltersBtn:active {
+      background: #d1d5db;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    #toggleFiltersBtn.active {
+      background: #3b82f6;
+      color: white;
+    }
+
     #centerMeBtn {
       background: #3b82f6;
       border: none;
@@ -310,19 +317,7 @@
       <h1>LA Trip Map</h1>
       <p id="locationCount">0 locations</p>
     </div>
-    <div id="header-right">
-      <button id="toggleFiltersBtn" title="Toggle category filters">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="4" y1="6" x2="20" y2="6"/>
-          <line x1="4" y1="12" x2="20" y2="12"/>
-          <line x1="4" y1="18" x2="20" y2="18"/>
-          <circle cx="8" cy="6" r="2" fill="currentColor"/>
-          <circle cx="16" cy="12" r="2" fill="currentColor"/>
-          <circle cx="12" cy="18" r="2" fill="currentColor"/>
-        </svg>
-      </button>
-      <button id="addBtnHeader">+</button>
-    </div>
+    <button id="addBtnHeader">+</button>
   </div>
   
   <div id="error">
@@ -347,16 +342,28 @@
       <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
       <button id="submitBtn">Add Location</button>
     </div>
-    
-    <div id="filters"></div>
   </div>
   
   <div id="map"></div>
   
+  <div id="filtersPanel">
+    <div id="filters"></div>
+  </div>
+
   <div id="locations">
     <div id="locationsHeader">
       <button id="collapseBtn">▼</button>
       <h2>All Locations</h2>
+      <button id="toggleFiltersBtn" title="Toggle category filters">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="4" y1="6" x2="20" y2="6"/>
+          <line x1="4" y1="12" x2="20" y2="12"/>
+          <line x1="4" y1="18" x2="20" y2="18"/>
+          <circle cx="8" cy="6" r="2" fill="currentColor"/>
+          <circle cx="16" cy="12" r="2" fill="currentColor"/>
+          <circle cx="12" cy="18" r="2" fill="currentColor"/>
+        </svg>
+      </button>
       <button id="centerMeBtn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <circle cx="12" cy="12" r="3"/>
@@ -627,9 +634,9 @@
     };
 
     document.getElementById('toggleFiltersBtn').onclick = () => {
-      const filters = document.getElementById('filters');
+      const filtersPanel = document.getElementById('filtersPanel');
       const toggleBtn = document.getElementById('toggleFiltersBtn');
-      filters.classList.toggle('hidden');
+      filtersPanel.classList.toggle('visible');
       toggleBtn.classList.toggle('active');
     };
 
