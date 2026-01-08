@@ -127,7 +127,7 @@
       border-top: 1px solid #e5e7eb;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
       z-index: 999;
-      transform: translateY(100%);
+      transform: translateY(calc(100% + 300px));
       transition: transform 0.3s ease;
       max-height: 50vh;
       overflow-y: auto;
@@ -151,7 +151,15 @@
       font-size: 0.875rem;
       font-weight: 500;
       cursor: pointer;
-      transition: opacity 0.2s;
+      transition: all 0.2s;
+      font-style: normal;
+    }
+
+    .filter-btn.inactive {
+      background: #e5e7eb !important;
+      color: #9ca3af !important;
+      font-style: italic;
+      opacity: 0.7;
     }
     
     #map {
@@ -641,7 +649,11 @@
         document.getElementById(`filter-${cat}`).onclick = () => {
           filters[cat] = !filters[cat];
           const btn = document.getElementById(`filter-${cat}`);
-          btn.style.opacity = filters[cat] ? '1' : '0.5';
+          if (filters[cat]) {
+            btn.classList.remove('inactive');
+          } else {
+            btn.classList.add('inactive');
+          }
           updateUI();
         };
       });
