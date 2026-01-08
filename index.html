@@ -10,10 +10,15 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow-x: hidden;
+      overflow: hidden;
+      height: 100vh;
     }
-    
+
     #header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
       background: #2563eb;
       color: white;
       padding: 1rem;
@@ -21,6 +26,7 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      z-index: 1001;
     }
     
     #header-left h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
@@ -54,17 +60,31 @@
       border-left: 4px solid #ef4444;
       color: #991b1b;
       padding: 1rem;
-      margin: 1rem;
+      margin: 1rem 1rem 0 1rem;
       display: none;
+      position: fixed;
+      top: 84px;
+      left: 0;
+      right: 0;
+      z-index: 1002;
     }
-    
+
     #error.show { display: block; }
-    
+
+    #mainContent {
+      position: fixed;
+      top: 84px;
+      left: 0;
+      right: 0;
+      bottom: 300px;
+      overflow: hidden;
+      transition: bottom 0.3s ease;
+    }
+
     #controls {
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
       background: white;
-      margin-bottom: 300px;
     }
     
     #addForm {
@@ -134,18 +154,14 @@
       transition: opacity 0.2s;
     }
     
-    #mapContainer {
-      position: relative;
-    }
-
     #map {
-      height: 400px;
+      height: calc(100vh - 84px - 300px);
       width: 100%;
       transition: height 0.3s ease;
     }
 
     #map.expanded {
-      height: calc(100vh - 240px);
+      height: calc(100vh - 84px - 60px);
     }
 
     #locations {
@@ -154,19 +170,26 @@
       left: 0;
       right: 0;
       height: 300px;
-      overflow-y: auto;
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
       padding: 1rem;
       z-index: 1000;
       transition: height 0.3s ease, padding 0.3s ease;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      display: flex;
+      flex-direction: column;
     }
 
     #locations.collapsed {
       height: 60px !important;
       padding: 0.75rem 1rem;
       overflow: hidden;
+    }
+
+    #locationsList {
+      overflow-y: auto;
+      flex: 1;
+      margin-top: 0.5rem;
     }
 
     #locations.collapsed #locationsList {
@@ -177,8 +200,8 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 0.5rem;
       gap: 0.5rem;
+      flex-shrink: 0;
     }
 
     #locationsHeader h2 {
@@ -323,28 +346,30 @@
   <div id="error">
     <p id="errorText"></p>
   </div>
-  
-  <div id="controls">
-    <div id="addForm">
-      <input type="text" id="nameInput" placeholder="Name" required>
-      <input type="text" id="addressInput" placeholder="Address in Los Angeles" required>
-      <select id="categoryInput">
-        <option value="restaurant">restaurant</option>
-        <option value="cafe">cafe</option>
-        <option value="bar">bar</option>
-        <option value="attraction">attraction</option>
-        <option value="nature">nature</option>
-        <option value="shopping">shopping</option>
-        <option value="area">area</option>
-        <option value="hotel">hotel</option>
-        <option value="other">other</option>
-      </select>
-      <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
-      <button id="submitBtn">Add Location</button>
+
+  <div id="mainContent">
+    <div id="controls">
+      <div id="addForm">
+        <input type="text" id="nameInput" placeholder="Name" required>
+        <input type="text" id="addressInput" placeholder="Address in Los Angeles" required>
+        <select id="categoryInput">
+          <option value="restaurant">restaurant</option>
+          <option value="cafe">cafe</option>
+          <option value="bar">bar</option>
+          <option value="attraction">attraction</option>
+          <option value="nature">nature</option>
+          <option value="shopping">shopping</option>
+          <option value="area">area</option>
+          <option value="hotel">hotel</option>
+          <option value="other">other</option>
+        </select>
+        <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
+        <button id="submitBtn">Add Location</button>
+      </div>
     </div>
+
+    <div id="map"></div>
   </div>
-  
-  <div id="map"></div>
   
   <div id="filtersPanel">
     <div id="filters"></div>
@@ -644,9 +669,18 @@
       const locations = document.getElementById('locations');
       const collapseBtn = document.getElementById('collapseBtn');
       const mapElement = document.getElementById('map');
+      const mainContent = document.getElementById('mainContent');
+
       locations.classList.toggle('collapsed');
       collapseBtn.classList.toggle('collapsed');
       mapElement.classList.toggle('expanded');
+
+      // Adjust mainContent bottom to match location panel height
+      if (locations.classList.contains('collapsed')) {
+        mainContent.style.bottom = '60px';
+      } else {
+        mainContent.style.bottom = '300px';
+      }
 
       // Force Leaflet to redraw map after resize
       setTimeout(() => {
