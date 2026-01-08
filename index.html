@@ -126,7 +126,6 @@
     
     #filtersPanel {
       position: fixed;
-      top: 84px;
       bottom: 300px;
       left: 0;
       right: 0;
@@ -134,17 +133,23 @@
       border-top: 1px solid #e5e7eb;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
       z-index: 999;
-      transform: translateX(-100%);
+      transform: translateY(calc(100% + 300px));
       transition: transform 0.3s ease, bottom 0.3s ease;
+      max-height: 40vh;
       overflow-y: auto;
     }
 
     #filtersPanel.visible {
-      transform: translateX(0);
+      transform: translateY(0);
     }
 
     #filtersPanel.collapsed-mode {
       bottom: 60px;
+      transform: translateY(calc(100% + 60px));
+    }
+
+    #filtersPanel.collapsed-mode.visible {
+      transform: translateY(0);
     }
 
     #filters {
