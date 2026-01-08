@@ -81,6 +81,12 @@
       transition: bottom 0.3s ease;
     }
 
+    #mapContainer {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
     #controls {
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
@@ -128,12 +134,21 @@
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
       z-index: 999;
       transform: translateY(calc(100% + 300px));
-      transition: transform 0.3s ease;
+      transition: transform 0.3s ease, bottom 0.3s ease;
       max-height: 50vh;
       overflow-y: auto;
     }
 
     #filtersPanel.visible {
+      transform: translateY(0);
+    }
+
+    #filtersPanel.collapsed-mode {
+      bottom: 60px;
+      transform: translateY(calc(100% + 60px));
+    }
+
+    #filtersPanel.collapsed-mode.visible {
       transform: translateY(0);
     }
 
@@ -156,20 +171,21 @@
     }
 
     .filter-btn.inactive {
-      background: #e5e7eb !important;
+      background: white !important;
       color: #9ca3af !important;
       font-style: italic;
-      opacity: 0.7;
+      opacity: 0.8;
+      border: 2px solid #d1d5db !important;
     }
     
     #map {
-      height: calc(100vh - 84px - 300px);
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       width: 100%;
-      transition: height 0.3s ease;
-    }
-
-    #map.expanded {
-      height: calc(100vh - 84px - 60px);
+      height: 100%;
     }
 
     #locations {
@@ -198,6 +214,9 @@
       overflow-y: auto;
       flex: 1;
       margin-top: 0.5rem;
+      position: relative;
+      mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
     }
 
     #locations.collapsed #locationsList {
@@ -376,7 +395,9 @@
       </div>
     </div>
 
-    <div id="map"></div>
+    <div id="mapContainer">
+      <div id="map"></div>
+    </div>
   </div>
   
   <div id="filtersPanel">
@@ -682,10 +703,12 @@
       const collapseBtn = document.getElementById('collapseBtn');
       const mapElement = document.getElementById('map');
       const mainContent = document.getElementById('mainContent');
+      const filtersPanel = document.getElementById('filtersPanel');
 
       locations.classList.toggle('collapsed');
       collapseBtn.classList.toggle('collapsed');
       mapElement.classList.toggle('expanded');
+      filtersPanel.classList.toggle('collapsed-mode');
 
       // Adjust mainContent bottom to match location panel height
       if (locations.classList.contains('collapsed')) {
