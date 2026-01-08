@@ -8,7 +8,10 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow-x: hidden;
+    }
     
     #header {
       background: #2563eb;
@@ -58,6 +61,7 @@
     #controls {
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
+      background: white;
     }
     
     #addForm {
@@ -107,19 +111,45 @@
       transition: opacity 0.2s;
     }
     
+    #mapContainer {
+      position: relative;
+    }
+
     #map {
       height: 400px;
       width: 100%;
+      transition: height 0.3s ease;
     }
-    
+
+    #map.expanded {
+      height: calc(100vh - 240px);
+    }
+
     #locations {
-      height: 250px;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 300px;
       overflow-y: auto;
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
       padding: 1rem;
+      z-index: 1000;
+      transition: height 0.3s ease, padding 0.3s ease;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
     }
-    
+
+    #locations.collapsed {
+      height: 60px !important;
+      padding: 0.75rem 1rem;
+      overflow: hidden;
+    }
+
+    #locations.collapsed #locationsList {
+      display: none;
+    }
+
     #locationsHeader {
       display: flex;
       justify-content: space-between;
@@ -180,19 +210,6 @@
 
     #centerMeBtn.loading {
       background: #93c5fd;
-    }
-
-    #locations {
-      transition: height 0.3s ease, padding 0.3s ease;
-    }
-
-    #locations.collapsed {
-      height: 60px !important;
-      padding: 0.75rem 1rem;
-    }
-
-    #locations.collapsed #locationsList {
-      display: none;
     }
     
     .location-card {
@@ -558,8 +575,15 @@
     document.getElementById('collapseBtn').onclick = () => {
       const locations = document.getElementById('locations');
       const collapseBtn = document.getElementById('collapseBtn');
+      const mapElement = document.getElementById('map');
       locations.classList.toggle('collapsed');
       collapseBtn.classList.toggle('collapsed');
+      mapElement.classList.toggle('expanded');
+
+      // Force Leaflet to redraw map after resize
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 300);
     };
 
     document.getElementById('centerMeBtn').onclick = centerOnUserLocation;
