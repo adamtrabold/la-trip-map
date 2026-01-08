@@ -214,8 +214,9 @@
       flex: 1;
       margin-top: 0.5rem;
       position: relative;
-      mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
-      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
+      padding-bottom: 80px;
+      mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black calc(100% - 40px), transparent 100%);
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black calc(100% - 40px), transparent 100%);
     }
 
     #locations.collapsed #locationsList {
