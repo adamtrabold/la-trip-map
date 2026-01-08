@@ -1,0 +1,12 @@
+{
+  "name": "la-trip-map",
+  "version": "1.0.0",
+  "description": "LA Trip Map - Business Hours Setup",
+  "type": "module",
+  "scripts": {
+    "fetch-hours": "node fetch-hours.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

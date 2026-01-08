@@ -483,7 +483,11 @@
   <script>
     const SUPABASE_URL = 'https://jgvckilmltimabfdvaly.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_TiO_hACvlsn4mfFazsHTlg_i9BnzCfr';
-    
+
+    // TODO: Add your Google Places API key here
+    // Get one from: https://console.cloud.google.com/apis/credentials
+    const GOOGLE_PLACES_API_KEY = '';
+
     const CATEGORY_COLORS = {
       restaurant: '#FF6B6B',
       cafe: '#4ECDC4',
@@ -582,6 +586,53 @@
         return null;
       }
     }
+
+    async function searchPlaceId(name, address) {
+      if (!GOOGLE_PLACES_API_KEY) {
+        console.warn('Google Places API key not configured, skipping hours fetch');
+        return null;
+      }
+
+      try {
+        // NOTE: Google Places API has CORS restrictions and may not work directly from browser.
+        // For adding new locations, hours might not be fetched. Use the fetch-hours.js script
+        // to populate hours for locations after adding them.
+        const query = encodeURIComponent(`${name} ${address} Los Angeles`);
+        const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${GOOGLE_PLACES_API_KEY}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === 'OK' && data.results.length > 0) {
+          return data.results[0].place_id;
+        }
+        return null;
+      } catch (err) {
+        console.error('Place search failed:', err);
+        return null;
+      }
+    }
+
+    async function fetchPlaceHours(placeId) {
+      if (!GOOGLE_PLACES_API_KEY || !placeId) {
+        return null;
+      }
+
+      try {
+        const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=opening_hours&key=${GOOGLE_PLACES_API_KEY}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === 'OK' && data.result && data.result.opening_hours) {
+          return data.result.opening_hours;
+        }
+        return null;
+      } catch (err) {
+        console.error('Failed to fetch place hours:', err);
+        return null;
+      }
+    }
     
     function centerOnUserLocation() {
       const btn = document.getElementById('centerMeBtn');
@@ -661,10 +712,55 @@
     }
     
     function isOpenNow(location) {
-      // TODO: Add hours data to locations in database
-      // For now, return true for all locations
-      // Future: Parse location.hours and check against current time
-      return true;
+      // If no hours data, assume closed
+      if (!location.hours || !location.hours.periods || location.hours.periods.length === 0) {
+        return false;
+      }
+
+      // Get current time in Los Angeles timezone
+      const now = new Date();
+      const laTimeString = now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const laTime = new Date(laTimeString);
+
+      const currentDay = laTime.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const currentHour = laTime.getHours();
+      const currentMinute = laTime.getMinutes();
+      const currentTime = currentHour * 100 + currentMinute; // Convert to HHMM format
+
+      // Check if current time falls within any open period
+      for (const period of location.hours.periods) {
+        if (!period.open) continue;
+
+        const openDay = period.open.day;
+        const openTime = parseInt(period.open.time);
+
+        // Handle periods that don't have a close time (open 24/7)
+        if (!period.close) {
+          return true;
+        }
+
+        const closeDay = period.close.day;
+        const closeTime = parseInt(period.close.time);
+
+        // Check if current day/time is within this period
+        // Handle periods that span multiple days (e.g., open late night)
+        if (openDay === closeDay) {
+          // Same day period
+          if (currentDay === openDay && currentTime >= openTime && currentTime < closeTime) {
+            return true;
+          }
+        } else {
+          // Period spans across days (e.g., Friday 10PM - Saturday 2AM)
+          if (currentDay === openDay && currentTime >= openTime) {
+            return true;
+          }
+          if (currentDay === closeDay && currentTime < closeTime) {
+            return true;
+          }
+        }
+      }
+
+      return false;
     }
 
     function updateMap() {
@@ -810,15 +906,15 @@
       const address = document.getElementById('addressInput').value;
       const category = document.getElementById('categoryInput').value;
       const notes = document.getElementById('notesInput').value;
-      
+
       if (!name || !address) {
         alert('Please provide name and address');
         return;
       }
-      
+
       document.getElementById('submitBtn').textContent = 'Adding...';
       document.getElementById('submitBtn').disabled = true;
-      
+
       const coords = await geocode(address);
       if (!coords) {
         alert('Could not geocode address. Try a different address.');
@@ -826,7 +922,17 @@
         document.getElementById('submitBtn').disabled = false;
         return;
       }
-      
+
+      // Fetch business hours from Google Places API
+      let hours = null;
+      if (GOOGLE_PLACES_API_KEY) {
+        document.getElementById('submitBtn').textContent = 'Fetching hours...';
+        const placeId = await searchPlaceId(name, address);
+        if (placeId) {
+          hours = await fetchPlaceHours(placeId);
+        }
+      }
+
       await addLocation({
         name,
         address,
@@ -834,9 +940,10 @@
         lat: coords.lat,
         lng: coords.lng,
         notes: notes || null,
-        visited: false
+        visited: false,
+        hours: hours
       });
-      
+
       document.getElementById('nameInput').value = '';
       document.getElementById('addressInput').value = '';
       document.getElementById('notesInput').value = '';
