@@ -434,11 +434,11 @@
   <div id="mainContent">
     <div id="controls">
       <div id="addForm">
-        <input type="text" id="nameInput" placeholder="Name" required>
         <div id="addressInputWrapper">
-          <input type="text" id="addressInput" placeholder="Address in Los Angeles" required autocomplete="off">
+          <input type="text" id="nameInput" placeholder="Search for a place in LA..." required autocomplete="off">
           <div id="addressAutocomplete"></div>
         </div>
+        <input type="text" id="addressInput" placeholder="Address in Los Angeles" required>
         <select id="categoryInput">
           <option value="restaurant">restaurant</option>
           <option value="cafe">cafe</option>
@@ -649,13 +649,11 @@
       // Extract just the place name (first part before comma)
       const placeName = displayName.split(',')[0].trim();
 
+      // Set name to the place name
+      nameInput.value = placeName;
+
       // Set address to the full display name
       addressInput.value = displayName;
-
-      // Auto-fill name if it's empty
-      if (!nameInput.value) {
-        nameInput.value = placeName;
-      }
 
       hideAutocomplete();
     }
@@ -869,11 +867,11 @@
 
     document.getElementById('centerMeBtn').onclick = centerOnUserLocation;
 
-    // Set up address autocomplete with debouncing (500ms delay)
+    // Set up place name autocomplete with debouncing (500ms delay)
     const debouncedSearch = debounce(searchAddress, 500);
-    const addressInput = document.getElementById('addressInput');
+    const nameInput = document.getElementById('nameInput');
 
-    addressInput.addEventListener('input', (e) => {
+    nameInput.addEventListener('input', (e) => {
       debouncedSearch(e.target.value);
     });
 
@@ -885,7 +883,7 @@
     });
 
     // Hide autocomplete when pressing Escape
-    addressInput.addEventListener('keydown', (e) => {
+    nameInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         hideAutocomplete();
       }
