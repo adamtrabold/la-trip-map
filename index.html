@@ -94,6 +94,11 @@
       padding: 1rem;
       border-bottom: 1px solid #e5e7eb;
       background: white;
+      display: none;
+    }
+
+    #controls.show {
+      display: block;
     }
     
     #addForm {
@@ -692,7 +697,9 @@
     };
     
     document.getElementById('addBtnHeader').onclick = () => {
+      const controls = document.getElementById('controls');
       const form = document.getElementById('addForm');
+      controls.classList.toggle('show');
       form.classList.toggle('show');
     };
 
@@ -766,6 +773,7 @@
       document.getElementById('nameInput').value = '';
       document.getElementById('addressInput').value = '';
       document.getElementById('notesInput').value = '';
+      document.getElementById('controls').classList.remove('show');
       document.getElementById('addForm').classList.remove('show');
       document.getElementById('submitBtn').textContent = 'Add Location';
       document.getElementById('submitBtn').disabled = false;
