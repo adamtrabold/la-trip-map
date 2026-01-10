@@ -614,15 +614,14 @@
       autocompleteDiv.classList.add('show');
 
       try {
-        // LA bounding box: viewbox=west,south,east,north
-        const searchQuery = encodeURIComponent(query);
+        // Add "Los Angeles" to query for context, but use viewbox for ranking (not hard boundary)
+        const searchQuery = `${query}, Los Angeles`;
         const params = new URLSearchParams({
           format: 'json',
-          q: query,
-          limit: '8',
+          q: searchQuery,
+          limit: '10',
           countrycodes: 'us',
-          viewbox: '-118.668,33.704,-118.155,34.337', // LA area bounding box
-          bounded: '1', // Restrict to viewbox
+          viewbox: '-118.668,33.704,-118.155,34.337', // LA area bounding box (for ranking priority)
           addressdetails: '1'
         });
 
