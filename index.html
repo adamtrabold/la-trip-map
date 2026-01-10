@@ -376,6 +376,10 @@
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
       border-left: 4px solid;
       transition: all 0.15s ease;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     .location-card:active,
@@ -870,9 +874,12 @@
       // Add click handlers to location cards
       const cards = list.querySelectorAll('.location-card');
       cards.forEach(card => {
+        let touchMoved = false;
+
         // Active state on press
         const addActive = (e) => {
           if (!e.target.closest('.location-actions')) {
+            touchMoved = false;
             card.classList.add('active');
           }
         };
@@ -881,8 +888,14 @@
           card.classList.remove('active');
         };
 
+        const handleTouchMove = () => {
+          touchMoved = true;
+          removeActive();
+        };
+
         card.addEventListener('mousedown', addActive);
         card.addEventListener('touchstart', addActive, { passive: true });
+        card.addEventListener('touchmove', handleTouchMove, { passive: true });
         card.addEventListener('mouseup', removeActive);
         card.addEventListener('mouseleave', removeActive);
         card.addEventListener('touchend', removeActive);
@@ -890,8 +903,8 @@
 
         // Click handler for highlighting marker
         card.addEventListener('click', (e) => {
-          // Don't trigger if clicking on action buttons
-          if (e.target.closest('.location-actions')) {
+          // Don't trigger if clicking on action buttons or if touch moved (was scrolling)
+          if (e.target.closest('.location-actions') || touchMoved) {
             return;
           }
           const locationId = card.getAttribute('data-id');
