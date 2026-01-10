@@ -378,7 +378,8 @@
       transition: all 0.15s ease;
     }
 
-    .location-card:active {
+    .location-card:active,
+    .location-card.active {
       background: #f3f4f6;
       transform: scale(0.98);
       box-shadow: 0 1px 1px rgba(0,0,0,0.03);
@@ -869,6 +870,25 @@
       // Add click handlers to location cards
       const cards = list.querySelectorAll('.location-card');
       cards.forEach(card => {
+        // Active state on press
+        const addActive = (e) => {
+          if (!e.target.closest('.location-actions')) {
+            card.classList.add('active');
+          }
+        };
+
+        const removeActive = () => {
+          card.classList.remove('active');
+        };
+
+        card.addEventListener('mousedown', addActive);
+        card.addEventListener('touchstart', addActive, { passive: true });
+        card.addEventListener('mouseup', removeActive);
+        card.addEventListener('mouseleave', removeActive);
+        card.addEventListener('touchend', removeActive);
+        card.addEventListener('touchcancel', removeActive);
+
+        // Click handler for highlighting marker
         card.addEventListener('click', (e) => {
           // Don't trigger if clicking on action buttons
           if (e.target.closest('.location-actions')) {
