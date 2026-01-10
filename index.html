@@ -205,7 +205,6 @@
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
       padding: 1rem;
-      padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0));
       z-index: 1000;
       transition: height 0.3s ease, padding 0.3s ease;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
@@ -224,6 +223,7 @@
       overflow-y: auto;
       flex: 1;
       margin-top: 0.5rem;
+      padding-bottom: env(safe-area-inset-bottom, 0);
       position: relative;
       mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
