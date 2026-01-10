@@ -270,10 +270,14 @@
       overflow-y: auto;
       flex: 1;
       margin-top: 0.5rem;
-      padding-bottom: env(safe-area-inset-bottom, 0);
       position: relative;
       mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
+    }
+
+    .location-list-spacer {
+      height: env(safe-area-inset-bottom, 0);
+      flex-shrink: 0;
     }
 
     #locations.collapsed #locationsList {
@@ -885,6 +889,7 @@
             <button class="delete-btn" onclick="confirmDelete('${loc.id}', '${loc.name}')">×</button>
           </div>
         </div>
+      `).join('') + '<div class="location-list-spacer"></div>';
       `).join('');
 
       // Add click handlers to location cards
