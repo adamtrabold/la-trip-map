@@ -79,7 +79,7 @@
       top: 83px;
       left: 0;
       right: 0;
-      bottom: 300px;
+      bottom: calc(300px + env(safe-area-inset-bottom, 0));
       overflow: hidden;
       transition: bottom 0.3s ease;
     }
@@ -134,14 +134,14 @@
     
     #filtersPanel {
       position: fixed;
-      bottom: 300px;
+      bottom: calc(300px + env(safe-area-inset-bottom, 0));
       left: 0;
       right: 0;
       background: white;
       border-top: 1px solid #e5e7eb;
       box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
       z-index: 999;
-      transform: translateY(calc(100% + 300px));
+      transform: translateY(calc(100% + 300px + env(safe-area-inset-bottom, 0)));
       transition: transform 0.3s ease, bottom 0.3s ease;
       max-height: 40vh;
       overflow-y: auto;
@@ -201,7 +201,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 300px;
+      height: calc(300px + env(safe-area-inset-bottom, 0));
       background: #f9fafb;
       border-top: 1px solid #e5e7eb;
       padding: 1rem;
@@ -727,7 +727,7 @@
       if (locations.classList.contains('collapsed')) {
         mainContent.style.bottom = `calc(60px + ${safeAreaBottom})`;
       } else {
-        mainContent.style.bottom = '300px';
+        mainContent.style.bottom = `calc(300px + ${safeAreaBottom})`;
       }
 
       // Force Leaflet to redraw map after resize
