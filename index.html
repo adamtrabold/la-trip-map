@@ -2,11 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>LA Trip Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
+    :root {
+      --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -144,8 +147,8 @@
     }
 
     #filtersPanel.collapsed-mode {
-      bottom: 60px;
-      transform: translateY(calc(100% + 60px));
+      bottom: calc(60px + env(safe-area-inset-bottom, 0));
+      transform: translateY(calc(100% + 60px + env(safe-area-inset-bottom, 0)));
     }
 
     #filtersPanel.collapsed-mode.visible {
@@ -208,12 +211,14 @@
       height: 60px !important;
       padding: 0.75rem 1rem;
       overflow: hidden;
+      bottom: env(safe-area-inset-bottom, 0);
     }
 
     #locationsList {
       overflow-y: auto;
       flex: 1;
       margin-top: 0.5rem;
+      padding-bottom: env(safe-area-inset-bottom, 0);
       position: relative;
       mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
@@ -711,8 +716,9 @@
       filtersPanel.classList.toggle('collapsed-mode');
 
       // Adjust mainContent bottom to match location panel height
+      const safeAreaBottom = getComputedStyle(document.documentElement).getPropertyValue('--safe-area-inset-bottom');
       if (locations.classList.contains('collapsed')) {
-        mainContent.style.bottom = '60px';
+        mainContent.style.bottom = `calc(60px + ${safeAreaBottom})`;
       } else {
         mainContent.style.bottom = '300px';
       }
