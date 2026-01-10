@@ -199,8 +199,8 @@
     }
 
     #filtersPanel.collapsed-mode {
-      bottom: calc(60px + env(safe-area-inset-bottom, 0));
-      transform: translateY(calc(100% + 60px + env(safe-area-inset-bottom, 0)));
+      bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+      transform: translateY(calc(100% + 60px + env(safe-area-inset-bottom, 0px)));
     }
 
     #filtersPanel.collapsed-mode.visible {
@@ -263,7 +263,7 @@
       height: 60px !important;
       padding: 0.75rem 1rem;
       overflow: hidden;
-      bottom: env(safe-area-inset-bottom, 0);
+      bottom: env(safe-area-inset-bottom, 0px);
     }
 
     #locationsList {
@@ -276,7 +276,7 @@
     }
 
     .location-list-spacer {
-      height: env(safe-area-inset-bottom, 0);
+      height: env(safe-area-inset-bottom, 0px);
       flex-shrink: 0;
     }
 
