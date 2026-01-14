@@ -22,8 +22,8 @@
       top: 0;
       left: 0;
       right: 0;
-      background: #6B8CAF;
-      color: white;
+      background: #FAFAF8;
+      color: #6B6A5F;
       padding: 1rem;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       display: flex;
@@ -36,9 +36,9 @@
     #header-left p { font-size: 0.875rem; opacity: 0.9; }
 
     #addBtnHeader {
-      background: white;
-      border: 2px solid white;
-      color: #6B8CAF;
+      background: #A8C5DD;
+      border: 2px solid #A8C5DD;
+      color: white;
       width: 40px;
       height: 40px;
       border-radius: 50%;
@@ -54,7 +54,8 @@
     }
 
     #addBtnHeader:active {
-      background: #F5F4EF;
+      background: #8FA3B8;
+      border-color: #8FA3B8;
       transform: scale(0.95);
     }
     
@@ -85,16 +86,22 @@
     }
 
     #mapContainer {
-      position: relative;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       width: 100%;
       height: 100%;
     }
 
     #controls {
+      position: relative;
       padding: 1rem;
       border-bottom: 1px solid #E8E6DD;
       background: white;
       display: none;
+      z-index: 10;
     }
 
     #controls.show {
@@ -271,6 +278,12 @@
       flex: 1;
       margin-top: 0.5rem;
       position: relative;
+      mask-image: none;
+      -webkit-mask-image: none;
+      transition: mask-image 0.3s ease, -webkit-mask-image 0.3s ease;
+    }
+
+    #locationsList.scrolling {
       padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
       mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
@@ -936,6 +949,15 @@
           highlightMarker(locationId);
         });
       });
+
+      // Add scroll handler to show gradient when scrolling
+      list.addEventListener('scroll', () => {
+        if (list.scrollTop > 0) {
+          list.classList.add('scrolling');
+        } else {
+          list.classList.remove('scrolling');
+        }
+      }, { passive: true });
     }
     
     function createFilters() {
