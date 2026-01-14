@@ -85,16 +85,22 @@
     }
 
     #mapContainer {
-      position: relative;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
       width: 100%;
       height: 100%;
     }
 
     #controls {
+      position: relative;
       padding: 1rem;
       border-bottom: 1px solid #E8E6DD;
       background: white;
       display: none;
+      z-index: 10;
     }
 
     #controls.show {
@@ -271,6 +277,12 @@
       flex: 1;
       margin-top: 0.5rem;
       position: relative;
+      mask-image: none;
+      -webkit-mask-image: none;
+      transition: mask-image 0.3s ease, -webkit-mask-image 0.3s ease;
+    }
+
+    #locationsList.scrolling {
       mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
       -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20px, black 100%);
     }
@@ -935,6 +947,15 @@
           highlightMarker(locationId);
         });
       });
+
+      // Add scroll handler to show gradient when scrolling
+      list.addEventListener('scroll', () => {
+        if (list.scrollTop > 0) {
+          list.classList.add('scrolling');
+        } else {
+          list.classList.remove('scrolling');
+        }
+      }, { passive: true });
     }
     
     function createFilters() {
