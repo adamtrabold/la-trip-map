@@ -17,48 +17,6 @@
       height: 100vh;
     }
 
-    #header {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      background: #FAFAF8;
-      color: #6B6A5F;
-      padding: 1rem;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      z-index: 1001;
-    }
-    
-    #header-left h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
-    #header-left p { font-size: 0.875rem; }
-
-    #addBtnHeader {
-      background: #E8E6DD;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      font-size: 1.5rem;
-      line-height: 1;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      font-weight: bold;
-      padding: 0;
-    }
-
-    #addBtnHeader:active {
-      background: #D1CFBF;
-      border-color: #D1CFBF;
-      transform: scale(0.95);
-    }
-    
     #error {
       background: #F5E6DD;
       border-left: 4px solid #C97850;
@@ -67,6 +25,7 @@
       margin: 1rem 1rem 0 1rem;
       display: none;
       position: fixed;
+      top: 0;
       left: 0;
       right: 0;
       z-index: 1002;
@@ -74,8 +33,38 @@
 
     #error.show { display: block; }
 
+    #floatingAddBtn {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: #E8E6DD;
+      border: 2px solid #E8E6DD;
+      color: #6B6A5F;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      font-size: 1.75rem;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      font-weight: bold;
+      padding: 0;
+      z-index: 1001;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    #floatingAddBtn:active {
+      background: #D1CFBF;
+      border-color: #D1CFBF;
+      transform: scale(0.95);
+    }
+
     #mainContent {
       position: fixed;
+      top: 0;
       left: 0;
       right: 0;
       bottom: 300px;
@@ -462,17 +451,11 @@
   </style>
 </head>
 <body>
-  <div id="header">
-    <div id="header-left">
-      <h1>LA Trip Map</h1>
-      <p id="locationCount">0 locations</p>
-    </div>
-    <button id="addBtnHeader">+</button>
-  </div>
-  
   <div id="error">
     <p id="errorText"></p>
   </div>
+
+  <button id="floatingAddBtn">+</button>
 
   <div id="mainContent">
     <div id="controls">
@@ -849,7 +832,7 @@
     }
 
     function updateUI() {
-      document.getElementById('locationCount').textContent = `${locations.length} locations`;
+      document.querySelector('#locationsHeader h2').textContent = `All Locations (${locations.length})`;
       updateMap();
       updateLocationsList();
     }
@@ -982,7 +965,7 @@
       }
     };
     
-    document.getElementById('addBtnHeader').onclick = () => {
+    document.getElementById('floatingAddBtn').onclick = () => {
       const controls = document.getElementById('controls');
       const form = document.getElementById('addForm');
       controls.classList.toggle('show');
@@ -1096,21 +1079,6 @@
     createFilters();
     fetchLocations();
     setInterval(fetchLocations, 10000);
-
-    // Set layout positions based on header height
-    function setLayoutPositions() {
-      const header = document.getElementById('header');
-      const mainContent = document.getElementById('mainContent');
-      const error = document.getElementById('error');
-      const headerHeight = header.offsetHeight;
-
-      mainContent.style.top = `${headerHeight}px`;
-      error.style.top = `${headerHeight}px`;
-    }
-
-    // Set positions on load and resize
-    setLayoutPositions();
-    window.addEventListener('resize', setLayoutPositions);
   </script>
 </body>
 </html>
