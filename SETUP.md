@@ -27,43 +27,23 @@ supabase link --project-ref jgvckilmltimabfdvaly
 supabase db push
 ```
 
-## Step 2: Configure Email Auth in Supabase
+## Step 2: Create User Accounts in Supabase
 
-### Fix Email Verification (Required)
+**Public signups are disabled.** Only pre-created accounts can log in.
 
-Since you're using GitHub Pages, email verification links currently point to localhost and won't work. Fix this:
+You must manually create accounts for the two authorized users:
 
 1. Go to https://supabase.com/dashboard/project/jgvckilmltimabfdvaly
-2. Navigate to **Authentication** → **URL Configuration**
-3. Set **Site URL** to your GitHub Pages URL: `https://adamtrabold.github.io/la-trip-map`
-4. Add this URL to **Redirect URLs** as well
+2. Navigate to **Authentication** → **Users**
+3. Click **Add user** → **Create new user**
+4. Enter email: `adamtrabold@gmail.com` and set a password
+5. Click **Create user**
+6. Repeat steps 3-5 for `ericatrabold@gmail.com`
 
-### Disable Email Confirmation (Recommended)
-
-For a simple two-user app, you can skip email confirmation:
-
-1. Go to **Authentication** → **Settings** (or **Email** settings)
-2. Find "Enable email confirmations"
-3. Toggle it **OFF**
-4. This allows instant login after signup
-
-### Create User Accounts
-
-Only these two email addresses are allowed to edit locations:
-- adamtrabold@gmail.com
-- ericatrabold@gmail.com
-
-**Option A: Manual Account Creation (Recommended)**
-1. Go to **Authentication** → **Users**
-2. Click **Add user** → **Create new user**
-3. Enter email: `adamtrabold@gmail.com` and set a password
-4. Repeat for `ericatrabold@gmail.com`
-5. With this approach, you can skip the signup button entirely
-
-**Option B: Self-Signup**
-1. Keep the signup button in the UI
-2. Each person signs up with their email
-3. Anyone else who tries to sign up will be unable to add/edit locations (RLS will block them)
+**Important**:
+- The app has no signup button - users can only log in with existing accounts
+- Only these two emails can modify locations (enforced by RLS policies)
+- Anyone else cannot create an account or modify data
 
 ## Step 3: Test the Implementation
 
@@ -80,18 +60,16 @@ Only these two email addresses are allowed to edit locations:
 
 ### Test 2: Protected Write Access (Auth Required)
 
-Still in the incognito window:
+Still in the incognito window (or use an account you manually created):
 
 1. Click the **+ button** to add a location
-   - **Expected**: Login modal appears
-2. Click **Sign Up** button
-3. Enter an email and password (minimum 6 characters)
-   - **Expected**: Account created successfully
-   - If email confirmation is enabled: Check your email
-   - If disabled: You're automatically logged in
+   - **Expected**: Login modal appears (no signup button, only login)
+2. Enter one of the authorized emails (adamtrabold@gmail.com or ericatrabold@gmail.com) and password
+3. Click **Login**
+   - **Expected**: You're logged in immediately
 4. After logging in, you should see:
-   - ✅ Green dot with your email in top-right
-   - ✅ "Logout" button available
+   - ✅ Account icon button appears in top-right
+   - ✅ Clicking it shows your email and logout button
 5. Try adding a location:
    - ✅ Should succeed without showing login modal
 6. Try marking a location as visited:
@@ -108,8 +86,8 @@ Still in the incognito window:
 
 ### Test 4: Logout and Verify Protection
 
-1. Click **Logout** in the auth status indicator
-   - **Expected**: Status indicator disappears
+1. Click the account icon button, then click **Logout** in the dropdown
+   - **Expected**: Account icon disappears
 2. Try to add a location
    - **Expected**: Login modal appears again
 3. Try to mark a location as visited

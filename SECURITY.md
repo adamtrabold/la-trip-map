@@ -136,18 +136,15 @@ This project **does not use** Supabase Edge Functions or any serverless function
 ### What attackers CAN do:
 
 ✅ View all public locations (intentional - it's a public trip map)
-✅ Create an account with any email address
 ✅ See the database schema through API introspection (not sensitive for this use case)
-
-**However**: Even if they create an account, they cannot modify locations unless they use one of the two authorized email addresses (adamtrabold@gmail.com or ericatrabold@gmail.com).
+❌ Create an account (signup is disabled - accounts must be manually created in Supabase dashboard)
 
 ### Potential risks and mitigations:
 
 **Risk**: Spam signups
-- **Impact**: Low - unauthorized users cannot modify data even if they sign up
-- **Mitigation**: Only adamtrabold@gmail.com and ericatrabold@gmail.com can modify data
-- **Mitigation**: Monitor user list in Supabase dashboard and delete spam accounts
-- **Mitigation**: Consider disabling public signups entirely (manually create the two accounts)
+- **Impact**: None - public signups are disabled
+- **Mitigation**: Signup button removed from UI
+- **Mitigation**: Accounts must be manually created in Supabase dashboard
 
 **Risk**: Rate limiting
 - **Mitigation**: Supabase has built-in rate limiting per IP

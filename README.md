@@ -13,7 +13,8 @@ Map view of places we may want to visit in LA. claude pulls from an apple note s
 
 This app uses **Supabase with Row Level Security (RLS)** policies:
 - ✅ Anyone can view locations (public read access)
-- 🔐 Authentication required to add, edit, or delete locations
+- 🔐 Only two authorized users can add, edit, or delete locations
+- 🚫 Public signups disabled - accounts must be manually created
 - 🔑 Supabase anon key safely exposed in client code (protected by RLS)
 
 **📖 Read more**: See [SECURITY.md](SECURITY.md) for detailed security architecture

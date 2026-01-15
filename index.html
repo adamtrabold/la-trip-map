@@ -634,7 +634,6 @@
       <input type="email" id="authEmailInput" placeholder="Email" autocomplete="email">
       <input type="password" id="authPasswordInput" placeholder="Password" autocomplete="current-password">
       <button id="loginBtn">Login</button>
-      <button id="signupBtn">Sign Up</button>
       <button id="cancelAuthBtn" class="secondary">Cancel</button>
       <p id="authError" style="color: #C97850; margin-top: 1rem; display: none;"></p>
     </div>
@@ -814,47 +813,6 @@
         currentUser = data.user;
         updateAuthUI();
         hideAuthModal();
-      }
-    }
-
-    async function signup() {
-      const email = document.getElementById('authEmailInput').value;
-      const password = document.getElementById('authPasswordInput').value;
-      const authError = document.getElementById('authError');
-
-      if (!email || !password) {
-        authError.textContent = 'Please enter email and password';
-        authError.style.display = 'block';
-        return;
-      }
-
-      if (password.length < 6) {
-        authError.textContent = 'Password must be at least 6 characters';
-        authError.style.display = 'block';
-        return;
-      }
-
-      const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password
-      });
-
-      if (error) {
-        authError.textContent = error.message;
-        authError.style.display = 'block';
-      } else {
-        // Auto-login after signup if email confirmation is disabled
-        if (data.user && data.session) {
-          currentUser = data.user;
-          updateAuthUI();
-          hideAuthModal();
-          showError('Account created successfully!');
-          setTimeout(hideError, 3000);
-        } else {
-          authError.textContent = 'Account created! Please check your email to confirm.';
-          authError.style.display = 'block';
-          authError.style.color = '#7BA862';
-        }
       }
     }
 
@@ -1363,7 +1321,6 @@
 
     // Auth event listeners
     document.getElementById('loginBtn').onclick = login;
-    document.getElementById('signupBtn').onclick = signup;
     document.getElementById('logoutBtn').onclick = logout;
     document.getElementById('cancelAuthBtn').onclick = hideAuthModal;
     document.getElementById('accountBtn').onclick = toggleAccountDropdown;
