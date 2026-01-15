@@ -889,6 +889,14 @@
       }
     }
 
+    function handleRLSError(error, operation) {
+      // Check if it's an RLS policy violation
+      if (error.message && (error.message.includes('row-level security') || error.message.includes('policy'))) {
+        return `Access denied: Only authorized users can ${operation} locations.`;
+      }
+      return `Failed to ${operation}: ${error.message}`;
+    }
+
     async function addLocation(loc) {
       if (!await requireAuth()) return;
 
@@ -900,7 +908,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to add: ${err.message}`);
+        showError(handleRLSError(err, 'add'));
       }
     }
 
@@ -916,7 +924,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to delete: ${err.message}`);
+        showError(handleRLSError(err, 'delete'));
       }
     }
 
@@ -932,7 +940,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to update: ${err.message}`);
+        showError(handleRLSError(err, 'update'));
       }
     }
     

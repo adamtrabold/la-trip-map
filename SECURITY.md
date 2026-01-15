@@ -44,20 +44,23 @@ ON locations FOR SELECT
 TO public
 USING (true);
 
--- Authenticated write access
-CREATE POLICY "Authenticated users can insert"
+-- Restricted write access (only specific emails)
+CREATE POLICY "Authorized users can insert"
 ON locations FOR INSERT
 TO authenticated
-WITH CHECK (true);
+WITH CHECK (
+  auth.jwt() ->> 'email' IN ('adamtrabold@gmail.com', 'ericatrabold@gmail.com')
+);
 
 -- Similar policies for UPDATE and DELETE
 ```
 
 **How this works**:
 1. **Anyone** with the anon key can read (`SELECT`) locations - intentional for a public trip map
-2. **Only authenticated users** can insert, update, or delete locations
-3. PostgreSQL enforces these policies at the database level
+2. **Only adamtrabold@gmail.com and ericatrabold@gmail.com** can insert, update, or delete locations
+3. PostgreSQL enforces these policies at the database level by checking the JWT email claim
 4. Even if someone has your anon key (which they do, it's in your HTML), they can't bypass RLS
+5. Even if someone else creates an account and logs in, they cannot modify data
 
 ### 3. Authentication
 
@@ -133,23 +136,27 @@ This project **does not use** Supabase Edge Functions or any serverless function
 ### What attackers CAN do:
 
 ✅ View all public locations (intentional - it's a public trip map)
-✅ Create an account (intentional - controlled by you via Supabase dashboard)
+✅ Create an account with any email address
 ✅ See the database schema through API introspection (not sensitive for this use case)
+
+**However**: Even if they create an account, they cannot modify locations unless they use one of the two authorized email addresses (adamtrabold@gmail.com or ericatrabold@gmail.com).
 
 ### Potential risks and mitigations:
 
 **Risk**: Spam signups
-- **Mitigation**: Enable email confirmation in Supabase settings
-- **Mitigation**: Monitor user list in Supabase dashboard
-- **Mitigation**: Add CAPTCHA if needed (future enhancement)
+- **Impact**: Low - unauthorized users cannot modify data even if they sign up
+- **Mitigation**: Only adamtrabold@gmail.com and ericatrabold@gmail.com can modify data
+- **Mitigation**: Monitor user list in Supabase dashboard and delete spam accounts
+- **Mitigation**: Consider disabling public signups entirely (manually create the two accounts)
 
 **Risk**: Rate limiting
 - **Mitigation**: Supabase has built-in rate limiting per IP
 - **Mitigation**: Can add custom rate limiting in edge functions if needed
 
-**Risk**: Data vandalism by authenticated users
-- **Mitigation**: Only share login credentials with trusted people
-- **Mitigation**: Use Supabase dashboard to manage users
+**Risk**: Account compromise (someone gains access to authorized email account)
+- **Mitigation**: Use strong, unique passwords for both accounts
+- **Mitigation**: Enable 2FA on Gmail accounts
+- **Mitigation**: Monitor Supabase activity logs for suspicious behavior
 - **Mitigation**: Can add audit logging if needed (future enhancement)
 
 ## Best Practices Followed

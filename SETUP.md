@@ -27,15 +27,43 @@ supabase link --project-ref jgvckilmltimabfdvaly
 supabase db push
 ```
 
-## Step 2: Enable Email Auth in Supabase
+## Step 2: Configure Email Auth in Supabase
+
+### Fix Email Verification (Required)
+
+Since you're using GitHub Pages, email verification links currently point to localhost and won't work. Fix this:
 
 1. Go to https://supabase.com/dashboard/project/jgvckilmltimabfdvaly
-2. Navigate to **Authentication** → **Providers**
-3. Make sure **Email** provider is enabled
-4. (Optional) Disable email confirmation if you want instant signups:
-   - Go to **Authentication** → **Settings**
-   - Find "Enable email confirmations"
-   - Toggle it off for easier testing
+2. Navigate to **Authentication** → **URL Configuration**
+3. Set **Site URL** to your GitHub Pages URL: `https://adamtrabold.github.io/la-trip-map`
+4. Add this URL to **Redirect URLs** as well
+
+### Disable Email Confirmation (Recommended)
+
+For a simple two-user app, you can skip email confirmation:
+
+1. Go to **Authentication** → **Settings** (or **Email** settings)
+2. Find "Enable email confirmations"
+3. Toggle it **OFF**
+4. This allows instant login after signup
+
+### Create User Accounts
+
+Only these two email addresses are allowed to edit locations:
+- adamtrabold@gmail.com
+- ericatrabold@gmail.com
+
+**Option A: Manual Account Creation (Recommended)**
+1. Go to **Authentication** → **Users**
+2. Click **Add user** → **Create new user**
+3. Enter email: `adamtrabold@gmail.com` and set a password
+4. Repeat for `ericatrabold@gmail.com`
+5. With this approach, you can skip the signup button entirely
+
+**Option B: Self-Signup**
+1. Keep the signup button in the UI
+2. Each person signs up with their email
+3. Anyone else who tries to sign up will be unable to add/edit locations (RLS will block them)
 
 ## Step 3: Test the Implementation
 
