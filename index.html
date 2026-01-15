@@ -6,7 +6,7 @@
   <title>LA Trip Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
   <style>
     :root {
       --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -661,7 +661,8 @@
     const SUPABASE_KEY = 'sb_publishable_TiO_hACvlsn4mfFazsHTlg_i9BnzCfr';
 
     // Initialize Supabase client with auth support
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const { createClient } = supabase;
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let currentUser = null;
 
@@ -687,7 +688,7 @@
 
     // Auth functions
     async function checkAuth() {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await supabaseClient.auth.getSession();
       currentUser = session?.user || null;
       updateAuthUI();
       return currentUser !== null;
@@ -728,7 +729,7 @@
         return;
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
         email,
         password
       });
@@ -760,7 +761,7 @@
         return;
       }
 
-      const { data, error } = await supabase.auth.signUp({
+      const { data, error } = await supabaseClient.auth.signUp({
         email,
         password
       });
@@ -785,7 +786,7 @@
     }
 
     async function logout() {
-      await supabase.auth.signOut();
+      await supabaseClient.auth.signOut();
       currentUser = null;
       updateAuthUI();
     }
@@ -800,7 +801,7 @@
 
     async function fetchLocations() {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from('locations')
           .select('*')
           .order('created_at', { ascending: false });
@@ -818,7 +819,7 @@
       if (!await requireAuth()) return;
 
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('locations')
           .insert([loc]);
 
@@ -833,7 +834,7 @@
       if (!await requireAuth()) return;
 
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('locations')
           .delete()
           .eq('id', id);
@@ -849,7 +850,7 @@
       if (!await requireAuth()) return;
 
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('locations')
           .update({ visited: !visited })
           .eq('id', id);
@@ -1370,7 +1371,7 @@
     }).addTo(map);
 
     // Initialize auth and set up auth state listener
-    supabase.auth.onAuthStateChange((event, session) => {
+    supabaseClient.auth.onAuthStateChange((event, session) => {
       currentUser = session?.user || null;
       updateAuthUI();
 
