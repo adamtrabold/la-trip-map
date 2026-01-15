@@ -634,7 +634,6 @@
       <input type="email" id="authEmailInput" placeholder="Email" autocomplete="email">
       <input type="password" id="authPasswordInput" placeholder="Password" autocomplete="current-password">
       <button id="loginBtn">Login</button>
-      <button id="signupBtn">Sign Up</button>
       <button id="cancelAuthBtn" class="secondary">Cancel</button>
       <p id="authError" style="color: #C97850; margin-top: 1rem; display: none;"></p>
     </div>
@@ -817,47 +816,6 @@
       }
     }
 
-    async function signup() {
-      const email = document.getElementById('authEmailInput').value;
-      const password = document.getElementById('authPasswordInput').value;
-      const authError = document.getElementById('authError');
-
-      if (!email || !password) {
-        authError.textContent = 'Please enter email and password';
-        authError.style.display = 'block';
-        return;
-      }
-
-      if (password.length < 6) {
-        authError.textContent = 'Password must be at least 6 characters';
-        authError.style.display = 'block';
-        return;
-      }
-
-      const { data, error } = await supabaseClient.auth.signUp({
-        email,
-        password
-      });
-
-      if (error) {
-        authError.textContent = error.message;
-        authError.style.display = 'block';
-      } else {
-        // Auto-login after signup if email confirmation is disabled
-        if (data.user && data.session) {
-          currentUser = data.user;
-          updateAuthUI();
-          hideAuthModal();
-          showError('Account created successfully!');
-          setTimeout(hideError, 3000);
-        } else {
-          authError.textContent = 'Account created! Please check your email to confirm.';
-          authError.style.display = 'block';
-          authError.style.color = '#7BA862';
-        }
-      }
-    }
-
     async function logout() {
       await supabaseClient.auth.signOut();
       currentUser = null;
@@ -889,6 +847,14 @@
       }
     }
 
+    function handleRLSError(error, operation) {
+      // Check if it's an RLS policy violation
+      if (error.message && (error.message.includes('row-level security') || error.message.includes('policy'))) {
+        return `Access denied: Only authorized users can ${operation} locations.`;
+      }
+      return `Failed to ${operation}: ${error.message}`;
+    }
+
     async function addLocation(loc) {
       if (!await requireAuth()) return;
 
@@ -900,7 +866,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to add: ${err.message}`);
+        showError(handleRLSError(err, 'add'));
       }
     }
 
@@ -916,7 +882,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to delete: ${err.message}`);
+        showError(handleRLSError(err, 'delete'));
       }
     }
 
@@ -932,7 +898,7 @@
         if (error) throw error;
         await fetchLocations();
       } catch (err) {
-        showError(`Failed to update: ${err.message}`);
+        showError(handleRLSError(err, 'update'));
       }
     }
     
@@ -1355,7 +1321,6 @@
 
     // Auth event listeners
     document.getElementById('loginBtn').onclick = login;
-    document.getElementById('signupBtn').onclick = signup;
     document.getElementById('logoutBtn').onclick = logout;
     document.getElementById('cancelAuthBtn').onclick = hideAuthModal;
     document.getElementById('accountBtn').onclick = toggleAccountDropdown;

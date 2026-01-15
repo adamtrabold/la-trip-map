@@ -27,15 +27,23 @@ supabase link --project-ref jgvckilmltimabfdvaly
 supabase db push
 ```
 
-## Step 2: Enable Email Auth in Supabase
+## Step 2: Create User Accounts in Supabase
+
+**Public signups are disabled.** Only pre-created accounts can log in.
+
+You must manually create accounts for the two authorized users:
 
 1. Go to https://supabase.com/dashboard/project/jgvckilmltimabfdvaly
-2. Navigate to **Authentication** → **Providers**
-3. Make sure **Email** provider is enabled
-4. (Optional) Disable email confirmation if you want instant signups:
-   - Go to **Authentication** → **Settings**
-   - Find "Enable email confirmations"
-   - Toggle it off for easier testing
+2. Navigate to **Authentication** → **Users**
+3. Click **Add user** → **Create new user**
+4. Enter email: `adamtrabold@gmail.com` and set a password
+5. Click **Create user**
+6. Repeat steps 3-5 for `ericatrabold@gmail.com`
+
+**Important**:
+- The app has no signup button - users can only log in with existing accounts
+- Only these two emails can modify locations (enforced by RLS policies)
+- Anyone else cannot create an account or modify data
 
 ## Step 3: Test the Implementation
 
@@ -52,18 +60,16 @@ supabase db push
 
 ### Test 2: Protected Write Access (Auth Required)
 
-Still in the incognito window:
+Still in the incognito window (or use an account you manually created):
 
 1. Click the **+ button** to add a location
-   - **Expected**: Login modal appears
-2. Click **Sign Up** button
-3. Enter an email and password (minimum 6 characters)
-   - **Expected**: Account created successfully
-   - If email confirmation is enabled: Check your email
-   - If disabled: You're automatically logged in
+   - **Expected**: Login modal appears (no signup button, only login)
+2. Enter one of the authorized emails (adamtrabold@gmail.com or ericatrabold@gmail.com) and password
+3. Click **Login**
+   - **Expected**: You're logged in immediately
 4. After logging in, you should see:
-   - ✅ Green dot with your email in top-right
-   - ✅ "Logout" button available
+   - ✅ Account icon button appears in top-right
+   - ✅ Clicking it shows your email and logout button
 5. Try adding a location:
    - ✅ Should succeed without showing login modal
 6. Try marking a location as visited:
@@ -80,8 +86,8 @@ Still in the incognito window:
 
 ### Test 4: Logout and Verify Protection
 
-1. Click **Logout** in the auth status indicator
-   - **Expected**: Status indicator disappears
+1. Click the account icon button, then click **Logout** in the dropdown
+   - **Expected**: Account icon disappears
 2. Try to add a location
    - **Expected**: Login modal appears again
 3. Try to mark a location as visited

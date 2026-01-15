@@ -27,11 +27,20 @@ supabase db push
 The migration sets up Row Level Security (RLS) with the following policies:
 
 - **Public read access**: Anyone can view locations (no authentication required)
-- **Authenticated insert**: Only authenticated users can add new locations
-- **Authenticated update**: Only authenticated users can mark locations as visited/unvisited
-- **Authenticated delete**: Only authenticated users can delete locations
+- **Authorized insert**: Only adamtrabold@gmail.com and ericatrabold@gmail.com can add new locations
+- **Authorized update**: Only adamtrabold@gmail.com and ericatrabold@gmail.com can mark locations as visited/unvisited
+- **Authorized delete**: Only adamtrabold@gmail.com and ericatrabold@gmail.com can delete locations
 
-This ensures that your database is publicly readable but only modifiable by authorized users.
+This ensures that your database is publicly readable but only modifiable by the two authorized users.
+
+### How It Works
+
+The RLS policies check the authenticated user's email address using:
+```sql
+auth.jwt() ->> 'email' IN ('adamtrabold@gmail.com', 'ericatrabold@gmail.com')
+```
+
+If someone else creates an account and tries to add/edit/delete locations, the database will reject the request with an RLS policy violation error.
 
 ## Security Model
 
