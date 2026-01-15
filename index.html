@@ -62,6 +62,11 @@
       transform: scale(0.95);
     }
 
+    #floatingAddBtn.active {
+      background: transparent;
+      border-color: #E8E6DD;
+    }
+
     #mainContent {
       position: fixed;
       top: 0;
@@ -969,8 +974,14 @@
     document.getElementById('floatingAddBtn').onclick = () => {
       const controls = document.getElementById('controls');
       const form = document.getElementById('addForm');
+      const btn = document.getElementById('floatingAddBtn');
+
       controls.classList.toggle('show');
       form.classList.toggle('show');
+      btn.classList.toggle('active');
+
+      // Toggle between + and ×
+      btn.textContent = btn.classList.contains('active') ? '×' : '+';
     };
 
     document.getElementById('toggleFiltersBtn').onclick = () => {
@@ -1067,6 +1078,8 @@
       document.getElementById('notesInput').value = '';
       document.getElementById('controls').classList.remove('show');
       document.getElementById('addForm').classList.remove('show');
+      document.getElementById('floatingAddBtn').classList.remove('active');
+      document.getElementById('floatingAddBtn').textContent = '+';
       document.getElementById('submitBtn').textContent = 'Add Location';
       document.getElementById('submitBtn').disabled = false;
     };
