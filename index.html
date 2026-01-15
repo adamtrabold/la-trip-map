@@ -70,6 +70,87 @@
       box-shadow: none;
     }
 
+    #accountBtn {
+      position: fixed;
+      top: 1rem;
+      right: 4.5rem;
+      background: #E8E6DD;
+      border: 2px solid #E8E6DD;
+      color: #6B6A5F;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      font-size: 1.25rem;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      padding: 0;
+      z-index: 2000;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    #accountBtn.show {
+      display: flex;
+    }
+
+    #accountBtn:active {
+      background: #D1CFBF;
+      border-color: #D1CFBF;
+      transform: scale(0.95);
+    }
+
+    #accountBtn.active {
+      background: #A8C5DD;
+      border-color: #A8C5DD;
+      color: white;
+    }
+
+    #accountDropdown {
+      position: fixed;
+      top: 4.5rem;
+      right: 4.5rem;
+      background: white;
+      border: 2px solid #E8E6DD;
+      border-radius: 0.5rem;
+      padding: 1rem;
+      z-index: 2000;
+      display: none;
+      flex-direction: column;
+      gap: 0.75rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      min-width: 200px;
+    }
+
+    #accountDropdown.show {
+      display: flex;
+    }
+
+    #accountDropdown .user-email {
+      font-size: 0.875rem;
+      color: #6B6A5F;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #E8E6DD;
+      word-break: break-all;
+    }
+
+    #accountDropdown button {
+      background: #F5E6DD;
+      color: #C97850;
+      border: none;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    #accountDropdown button:hover {
+      background: #F0DAD0;
+    }
+
     #mainContent {
       position: fixed;
       top: 0;
@@ -529,44 +610,9 @@
       background: #F5F4EF;
     }
 
-    /* Auth Status Indicator */
+    /* Auth Status Indicator - Hidden, using account button instead */
     #authStatus {
-      position: fixed;
-      top: 4.5rem;
-      right: 1rem;
-      background: white;
-      border: 2px solid #E8E6DD;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.375rem;
-      font-size: 0.75rem;
-      color: #6B6A5F;
-      z-index: 2000;
-      display: none;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    #authStatus.show {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    #authStatus .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #A8B89E;
-    }
-
-    #authStatus button {
-      background: transparent;
-      border: none;
-      color: #C97850;
-      cursor: pointer;
-      padding: 0;
-      margin-left: 0.5rem;
-      font-size: 0.75rem;
-      text-decoration: underline;
+      display: none !important;
     }
   </style>
 </head>
@@ -592,6 +638,18 @@
       <button id="cancelAuthBtn" class="secondary">Cancel</button>
       <p id="authError" style="color: #C97850; margin-top: 1rem; display: none;"></p>
     </div>
+  </div>
+
+  <button id="accountBtn">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+      <circle cx="12" cy="7" r="4"></circle>
+    </svg>
+  </button>
+
+  <div id="accountDropdown">
+    <div class="user-email" id="dropdownUserEmail"></div>
+    <button id="dropdownLogoutBtn">Logout</button>
   </div>
 
   <button id="floatingAddBtn">+</button>
@@ -695,15 +753,30 @@
     }
 
     function updateAuthUI() {
-      const authStatus = document.getElementById('authStatus');
-      const authUserEmail = document.getElementById('authUserEmail');
+      const accountBtn = document.getElementById('accountBtn');
+      const dropdownUserEmail = document.getElementById('dropdownUserEmail');
 
       if (currentUser) {
-        authUserEmail.textContent = currentUser.email;
-        authStatus.classList.add('show');
+        dropdownUserEmail.textContent = currentUser.email;
+        accountBtn.classList.add('show');
       } else {
-        authStatus.classList.remove('show');
+        accountBtn.classList.remove('show');
+        hideAccountDropdown();
       }
+    }
+
+    function toggleAccountDropdown() {
+      const dropdown = document.getElementById('accountDropdown');
+      const accountBtn = document.getElementById('accountBtn');
+      dropdown.classList.toggle('show');
+      accountBtn.classList.toggle('active');
+    }
+
+    function hideAccountDropdown() {
+      const dropdown = document.getElementById('accountDropdown');
+      const accountBtn = document.getElementById('accountBtn');
+      dropdown.classList.remove('show');
+      accountBtn.classList.remove('active');
     }
 
     async function showAuthModal() {
@@ -788,6 +861,7 @@
     async function logout() {
       await supabaseClient.auth.signOut();
       currentUser = null;
+      hideAccountDropdown();
       updateAuthUI();
     }
 
@@ -1284,6 +1358,8 @@
     document.getElementById('signupBtn').onclick = signup;
     document.getElementById('logoutBtn').onclick = logout;
     document.getElementById('cancelAuthBtn').onclick = hideAuthModal;
+    document.getElementById('accountBtn').onclick = toggleAccountDropdown;
+    document.getElementById('dropdownLogoutBtn').onclick = logout;
 
     // Close auth modal when clicking outside
     document.getElementById('authModal').onclick = (e) => {
@@ -1291,6 +1367,16 @@
         hideAuthModal();
       }
     };
+
+    // Close account dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      const accountBtn = document.getElementById('accountBtn');
+      const accountDropdown = document.getElementById('accountDropdown');
+
+      if (!accountBtn.contains(e.target) && !accountDropdown.contains(e.target)) {
+        hideAccountDropdown();
+      }
+    });
 
     // Allow Enter key to submit login
     document.getElementById('authPasswordInput').addEventListener('keypress', (e) => {
