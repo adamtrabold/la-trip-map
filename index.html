@@ -6,6 +6,7 @@
   <title>LA Trip Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
       --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -452,11 +453,145 @@
     .highlighted-marker {
       animation: markerPulse 1.5s ease-in-out infinite;
     }
+
+    /* Auth Modal */
+    #authModal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 3000;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    #authModal.show {
+      display: flex;
+    }
+
+    #authModalContent {
+      background: white;
+      padding: 2rem;
+      border-radius: 0.5rem;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    #authModalContent h2 {
+      margin: 0 0 1rem 0;
+      font-size: 1.5rem;
+    }
+
+    #authModalContent p {
+      margin: 0 0 1.5rem 0;
+      color: #6B6A5F;
+      font-size: 0.875rem;
+    }
+
+    #authModalContent input {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid #D1CFBF;
+      border-radius: 0.375rem;
+      margin-bottom: 0.75rem;
+      font-size: 1rem;
+    }
+
+    #authModalContent button {
+      width: 100%;
+      background: #A8C5DD;
+      color: white;
+      border: none;
+      padding: 0.75rem;
+      border-radius: 0.375rem;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 0.5rem;
+    }
+
+    #authModalContent button:hover {
+      background: #92B3C9;
+    }
+
+    #authModalContent button.secondary {
+      background: transparent;
+      color: #6B6A5F;
+      border: 1px solid #D1CFBF;
+    }
+
+    #authModalContent button.secondary:hover {
+      background: #F5F4EF;
+    }
+
+    /* Auth Status Indicator */
+    #authStatus {
+      position: fixed;
+      top: 4.5rem;
+      right: 1rem;
+      background: white;
+      border: 2px solid #E8E6DD;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.375rem;
+      font-size: 0.75rem;
+      color: #6B6A5F;
+      z-index: 2000;
+      display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    #authStatus.show {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    #authStatus .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #A8B89E;
+    }
+
+    #authStatus button {
+      background: transparent;
+      border: none;
+      color: #C97850;
+      cursor: pointer;
+      padding: 0;
+      margin-left: 0.5rem;
+      font-size: 0.75rem;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
   <div id="error">
     <p id="errorText"></p>
+  </div>
+
+  <div id="authStatus">
+    <span class="status-dot"></span>
+    <span id="authUserEmail"></span>
+    <button id="logoutBtn">Logout</button>
+  </div>
+
+  <div id="authModal">
+    <div id="authModalContent">
+      <h2>Login Required</h2>
+      <p>You need to log in to add, edit, or delete locations. Anyone can view locations without logging in.</p>
+      <input type="email" id="authEmailInput" placeholder="Email" autocomplete="email">
+      <input type="password" id="authPasswordInput" placeholder="Password" autocomplete="current-password">
+      <button id="loginBtn">Login</button>
+      <button id="signupBtn">Sign Up</button>
+      <button id="cancelAuthBtn" class="secondary">Cancel</button>
+      <p id="authError" style="color: #C97850; margin-top: 1rem; display: none;"></p>
+    </div>
   </div>
 
   <button id="floatingAddBtn">+</button>
@@ -524,7 +659,12 @@
   <script>
     const SUPABASE_URL = 'https://jgvckilmltimabfdvaly.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_TiO_hACvlsn4mfFazsHTlg_i9BnzCfr';
-    
+
+    // Initialize Supabase client with auth support
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let currentUser = null;
+
     const CATEGORY_COLORS = {
       restaurant: '#C9A855',
       cafe: '#8B7355',
@@ -544,61 +684,177 @@
     let filters = {};
     
     Object.keys(CATEGORY_COLORS).forEach(cat => filters[cat] = true);
-    
-    const headers = {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    };
-    
+
+    // Auth functions
+    async function checkAuth() {
+      const { data: { session } } = await supabase.auth.getSession();
+      currentUser = session?.user || null;
+      updateAuthUI();
+      return currentUser !== null;
+    }
+
+    function updateAuthUI() {
+      const authStatus = document.getElementById('authStatus');
+      const authUserEmail = document.getElementById('authUserEmail');
+
+      if (currentUser) {
+        authUserEmail.textContent = currentUser.email;
+        authStatus.classList.add('show');
+      } else {
+        authStatus.classList.remove('show');
+      }
+    }
+
+    async function showAuthModal() {
+      document.getElementById('authModal').classList.add('show');
+      document.getElementById('authError').style.display = 'none';
+    }
+
+    function hideAuthModal() {
+      document.getElementById('authModal').classList.remove('show');
+      document.getElementById('authEmailInput').value = '';
+      document.getElementById('authPasswordInput').value = '';
+      document.getElementById('authError').style.display = 'none';
+    }
+
+    async function login() {
+      const email = document.getElementById('authEmailInput').value;
+      const password = document.getElementById('authPasswordInput').value;
+      const authError = document.getElementById('authError');
+
+      if (!email || !password) {
+        authError.textContent = 'Please enter email and password';
+        authError.style.display = 'block';
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        authError.textContent = error.message;
+        authError.style.display = 'block';
+      } else {
+        currentUser = data.user;
+        updateAuthUI();
+        hideAuthModal();
+      }
+    }
+
+    async function signup() {
+      const email = document.getElementById('authEmailInput').value;
+      const password = document.getElementById('authPasswordInput').value;
+      const authError = document.getElementById('authError');
+
+      if (!email || !password) {
+        authError.textContent = 'Please enter email and password';
+        authError.style.display = 'block';
+        return;
+      }
+
+      if (password.length < 6) {
+        authError.textContent = 'Password must be at least 6 characters';
+        authError.style.display = 'block';
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password
+      });
+
+      if (error) {
+        authError.textContent = error.message;
+        authError.style.display = 'block';
+      } else {
+        // Auto-login after signup if email confirmation is disabled
+        if (data.user && data.session) {
+          currentUser = data.user;
+          updateAuthUI();
+          hideAuthModal();
+          showError('Account created successfully!');
+          setTimeout(hideError, 3000);
+        } else {
+          authError.textContent = 'Account created! Please check your email to confirm.';
+          authError.style.display = 'block';
+          authError.style.color = '#7BA862';
+        }
+      }
+    }
+
+    async function logout() {
+      await supabase.auth.signOut();
+      currentUser = null;
+      updateAuthUI();
+    }
+
+    async function requireAuth() {
+      if (!currentUser) {
+        await showAuthModal();
+        return false;
+      }
+      return true;
+    }
+
     async function fetchLocations() {
       try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/locations?select=*&order=created_at.desc`, { headers });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        locations = await response.json();
+        const { data, error } = await supabase
+          .from('locations')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        locations = data || [];
         updateUI();
         hideError();
       } catch (err) {
         showError(`Failed to load: ${err.message}`);
       }
     }
-    
+
     async function addLocation(loc) {
+      if (!await requireAuth()) return;
+
       try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/locations`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(loc)
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const { error } = await supabase
+          .from('locations')
+          .insert([loc]);
+
+        if (error) throw error;
         await fetchLocations();
       } catch (err) {
         showError(`Failed to add: ${err.message}`);
       }
     }
-    
+
     async function deleteLocation(id) {
+      if (!await requireAuth()) return;
+
       try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/locations?id=eq.${id}`, {
-          method: 'DELETE',
-          headers
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const { error } = await supabase
+          .from('locations')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
         await fetchLocations();
       } catch (err) {
         showError(`Failed to delete: ${err.message}`);
       }
     }
-    
+
     async function toggleVisited(id, visited) {
+      if (!await requireAuth()) return;
+
       try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/locations?id=eq.${id}`, {
-          method: 'PATCH',
-          headers,
-          body: JSON.stringify({ visited: !visited })
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const { error } = await supabase
+          .from('locations')
+          .update({ visited: !visited })
+          .eq('id', id);
+
+        if (error) throw error;
         await fetchLocations();
       } catch (err) {
         showError(`Failed to update: ${err.message}`);
@@ -969,10 +1225,15 @@
       }
     };
     
-    document.getElementById('floatingAddBtn').onclick = () => {
+    document.getElementById('floatingAddBtn').onclick = async () => {
       const controls = document.getElementById('controls');
       const form = document.getElementById('addForm');
       const btn = document.getElementById('floatingAddBtn');
+
+      // If trying to open the form, check auth first
+      if (!btn.classList.contains('active')) {
+        if (!await requireAuth()) return;
+      }
 
       controls.classList.toggle('show');
       form.classList.toggle('show');
@@ -1016,6 +1277,26 @@
     };
 
     document.getElementById('centerMeBtn').onclick = centerOnUserLocation;
+
+    // Auth event listeners
+    document.getElementById('loginBtn').onclick = login;
+    document.getElementById('signupBtn').onclick = signup;
+    document.getElementById('logoutBtn').onclick = logout;
+    document.getElementById('cancelAuthBtn').onclick = hideAuthModal;
+
+    // Close auth modal when clicking outside
+    document.getElementById('authModal').onclick = (e) => {
+      if (e.target.id === 'authModal') {
+        hideAuthModal();
+      }
+    };
+
+    // Allow Enter key to submit login
+    document.getElementById('authPasswordInput').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        login();
+      }
+    });
 
     // Set up place name autocomplete with debouncing (1000ms delay to avoid rate limiting)
     const debouncedSearch = debounce(searchAddress, 1000);
@@ -1087,7 +1368,21 @@
       attribution: '© OpenStreetMap contributors',
       maxZoom: 19
     }).addTo(map);
-    
+
+    // Initialize auth and set up auth state listener
+    supabase.auth.onAuthStateChange((event, session) => {
+      currentUser = session?.user || null;
+      updateAuthUI();
+
+      // If user just signed in and auth modal is open, close it
+      if (event === 'SIGNED_IN' && document.getElementById('authModal').classList.contains('show')) {
+        hideAuthModal();
+      }
+    });
+
+    // Check auth on page load
+    checkAuth();
+
     createFilters();
     fetchLocations();
     setInterval(fetchLocations, 10000);
