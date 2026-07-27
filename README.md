@@ -1,3 +1,5 @@
+[Status: Supabase archived due to inactivity, so will not work until I activate for the next trip :)]
+
 Map view of places we may want to visit in LA. claude pulls from an apple note screenshot, finds addresses, puts them in supabase. this is an ugly but functional view on their physical location, complete with location access so we can take advantage when another thing we thought might be cool is near where we currently are.
 
 ## Features
