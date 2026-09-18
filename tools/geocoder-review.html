@@ -33,16 +33,16 @@
 <h1>Tripline — Geocoder with Review</h1>
 <p class="desc">
   Fetches up to 4 Nominatim candidates per place (address-only AND name-based when an address is known, merged
-  together) instead of blindly trusting result #1. Every candidate shows its distance from that city's center —
-  anything implausibly far is flagged and <strong>not</strong> pre-selected, so a wrong match (like a same-named
-  place in a different town) can't slip through silently. Runs at 1 request per 2.5 seconds. Review/change any
-  selection, then generate the SQL whenever you're satisfied — you can regenerate as many times as you like
-  without re-fetching.
+  together). The closest plausible candidate is <strong>auto-accepted automatically</strong> — no clicking
+  required. Only places with <strong>no candidate within 12km of the city center</strong> (or no candidate at
+  all) are left open below for you to glance at and pick manually; everything else is collapsed and already
+  included in the SQL. Runs at 1 request per 2.5 seconds. SQL is generated automatically once fetching finishes —
+  you can still expand any collapsed entry to override it, then regenerate.
 </p>
 <p id="count"></p>
 <button id="startBtn">Start (~7 minutes for ~160 places)</button>
 <div id="progress"></div>
-<button id="genBtn" style="display:none">Generate SQL from current selections</button>
+<button id="genBtn" style="display:none">Regenerate SQL from current selections</button>
 <div id="summary"></div>
 <textarea id="output" placeholder="SQL appears here once you click Generate..." readonly></textarea>
 <div id="cards"></div>
@@ -278,6 +278,8 @@ const FAR_THRESHOLD_KM = 12; // beyond this, don't auto-select — force a consc
 function renderCard(place, candidates, idx) {
   const card = document.createElement('div');
   card.className = 'card' + (candidates.length === 0 ? ' no-candidates' : '');
+  card.style.margin = '0';
+  card.style.border = 'none';
   card.dataset.idx = idx;
 
   const h = document.createElement('h3');
@@ -334,13 +336,14 @@ function renderCard(place, candidates, idx) {
   skipLabel.appendChild(document.createTextNode(candidates.length === 0 ? 'No candidates found — skip, add manually via the app' : 'Skip — none of these are right, add manually via the app'));
   card.appendChild(skipLabel);
 
-  return card;
+  return { card, autoSelected };
 }
 
 document.getElementById('startBtn').onclick = async () => {
   document.getElementById('startBtn').disabled = true;
   const cardsById = [];
   const cardsEl = document.getElementById('cards');
+  let autoCount = 0, reviewCount = 0;
   for (let i = 0; i < PLACES.length; i++) {
     const p = PLACES[i];
     document.getElementById('progress').textContent = `${i + 1} / ${PLACES.length} — ${p.name}`;
@@ -351,17 +354,43 @@ document.getElementById('startBtn').onclick = async () => {
       candidates = [];
     }
     cardsById[i] = { place: p, candidates };
-    cardsEl.appendChild(renderCard(p, candidates, i));
+    const { card, autoSelected } = renderCard(p, candidates, i);
+
+    const details = document.createElement('details');
+    details.open = !autoSelected;
+    details.className = 'card' + (autoSelected ? '' : ' no-candidates');
+    details.style.padding = '0';
+    const summary = document.createElement('summary');
+    summary.style.cursor = 'pointer';
+    summary.style.fontWeight = '600';
+    summary.style.fontSize = '0.9rem';
+    summary.style.padding = '0.6rem 0.9rem';
+    if (autoSelected) {
+      summary.style.color = '#4a7c3f';
+      summary.textContent = `✓ Auto-accepted — ${p.name} (click to review/override)`;
+      autoCount++;
+    } else {
+      summary.style.color = '#C97850';
+      summary.textContent = `⚠ Needs your review — ${p.name}`;
+      reviewCount++;
+    }
+    card.style.padding = '0 0.9rem 0.9rem 0.9rem';
+    details.appendChild(summary);
+    details.appendChild(card);
+    cardsEl.appendChild(details);
+
     document.getElementById('genBtn').style.display = 'inline-block';
     await sleep(2500);
   }
-  document.getElementById('progress').textContent = `Done fetching all ${PLACES.length}. Review selections below, then Generate SQL.`;
+  document.getElementById('progress').textContent =
+    `Done. ${autoCount} auto-accepted, ${reviewCount} need your review (expanded below). SQL generated automatically.`;
   document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
   document.getElementById('startBtn').disabled = false;
   window._tripline_cards = cardsById;
+  generateSQL();
 };
 
-document.getElementById('genBtn').onclick = () => {
+function generateSQL() {
   const cardsById = window._tripline_cards || [];
   const rows = [];
   const skipped = [];
@@ -372,12 +401,16 @@ document.getElementById('genBtn').onclick = () => {
     rows.push({ ...place, lat: c.lat, lng: c.lng, address: c.address });
   });
 
-  let sql = `-- Tripline location import — reviewed batch, generated ${new Date().toISOString()}\n`;
+  let sql = `-- Tripline location import — auto-accepted + reviewed, generated ${new Date().toISOString()}\n`;
   sql += `-- ${rows.length} confirmed, ${skipped.length} skipped for manual entry.\n\n`;
-  sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
-  sql += rows.map(r =>
-    `  ('${esc(r.name)}', '${esc(r.address)}', '${r.category}', ${r.lat}, ${r.lng}, ${r.notes ? `'${esc(r.notes)}'` : 'NULL'}, false, '${r.city}')`
-  ).join(',\n') + ';\n';
+  if (rows.length) {
+    sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
+    sql += rows.map(r =>
+      `  ('${esc(r.name)}', '${esc(r.address)}', '${r.category}', ${r.lat}, ${r.lng}, ${r.notes ? `'${esc(r.notes)}'` : 'NULL'}, false, '${r.city}')`
+    ).join(',\n') + ';\n';
+  } else {
+    sql += `-- Nothing confirmed yet.\n`;
+  }
 
   if (skipped.length) {
     sql += `\n-- SKIPPED (add manually via the app):\n`;
@@ -386,7 +419,9 @@ document.getElementById('genBtn').onclick = () => {
 
   document.getElementById('output').value = sql;
   document.getElementById('summary').textContent = `${rows.length} confirmed, ${skipped.length} skipped.`;
-};
+}
+
+document.getElementById('genBtn').onclick = generateSQL;
 </script>
 </body>
 </html>
