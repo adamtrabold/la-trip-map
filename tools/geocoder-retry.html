@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tripline — Geocoder Retry (batch 2, misses only)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  p.desc { color: #555; }
+  button { background: #A8C5DD; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #log { font-family: ui-monospace, monospace; font-size: 0.8rem; background: #f5f4ef; border: 1px solid #ddd; border-radius: 0.5rem; padding: 1rem; height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 1rem; }
+  #progress { margin-top: 0.5rem; font-weight: 600; }
+  textarea { width: 100%; height: 400px; font-family: ui-monospace, monospace; font-size: 0.8rem; margin-top: 1rem; box-sizing: border-box; }
+  .warn { color: #C97850; }
+  .ok { color: #4a7c3f; }
+  .retry { color: #888; }
+</style>
+</head>
+<body>
+<h1>Tripline — Geocoder Retry (batch 2)</h1>
+<p class="desc">
+  Just the 57 places batch 1 missed. Uses a slower rate (1 request per 2.5s, vs 1.1s in batch 1) since the
+  original miss pattern — nearly every Malmö place with a full street address came back empty — looks like
+  Nominatim soft-throttling rather than genuine no-match. For places with a known address, tries the address
+  alone first (more reliable than a business name), then falls back to name+address if that fails.
+</p>
+<p id="count"></p>
+<button id="startBtn">Start retry (~2.5 minutes)</button>
+<div id="progress"></div>
+<div id="log"></div>
+<textarea id="output" placeholder="SQL will appear here once done..." readonly></textarea>
+
+<script>
+const CITIES = {
+  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland' },
+  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København' },
+  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö' },
+  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm' }
+};
+
+const PLACES = [
+{city:'reykjavik', name:'Old Harbour Reykjavik', hint:'Grandi', category:'area', notes:'Old Harbour creative district — anchor for the Grandi neighborhood picks.'},
+{city:'reykjavik', name:'Kogga Ceramic Studio', hint:'Vesturgata', category:'shopping', notes:"Working potters' studio/gallery, Vesturgata."},
+{city:'reykjavik', name:'Ker Reykjavik', category:'shopping', notes:'Minimalist handcrafted ceramics/homewares.'},
+{city:'reykjavik', name:'Hafnarhús Reykjavik Art Museum', category:'attraction', notes:'Contemporary, Erró collection.'},
+{city:'reykjavik', name:'Omnom Chocolate Factory', category:'attraction', notes:'Kid-friendly chocolate-making, great packaging design.'},
+{city:'reykjavik', name:'Farmers Market and Friends Reykjavik', category:'shopping', notes:'Nordic design homewares/clothing.'},
+{city:'reykjavik', name:'The Handknitting Association of Iceland', category:'shopping', notes:'A real Icelandic lopapeysa sweater.'},
+{city:'reykjavik', name:'Kattakaffihúsið Cat Café', category:'cafe', notes:'Kid favorite; vegan cakes/waffles.'},
+{city:'reykjavik', name:'Kolaportið Flea Market', category:'shopping', notes:'Sunday only (Sept 20), 11am-5pm, Old Harbour — secondhand clothes, sweaters, candy stalls.'},
+
+{city:'copenhagen', name:'The Little Mermaid statue Copenhagen', category:'attraction', notes:"Small statue, quick stop, don't over-plan around it."},
+{city:'copenhagen', name:'Danish Architecture Center BLOX', category:'attraction', notes:'Models/exhibits on Danish architecture & urbanism.'},
+{city:'copenhagen', name:'V1 Gallery', hint:'Vesterbro', category:'attraction', notes:'Leading contemporary gallery, street-art-adjacent roster.'},
+{city:'copenhagen', name:'Nils Stærk gallery', category:'attraction', notes:'Respected contemporary gallery.'},
+{city:'copenhagen', name:'Frama Copenhagen', hint:'Nørrebro', category:'shopping', notes:'Apothecary-meets-design studio/showroom.'},
+{city:'copenhagen', name:'CopenHill Amager Bakke', category:'attraction', notes:'Waste-to-energy plant with rooftop hiking trail/ski slope/climbing wall.'},
+{city:'copenhagen', name:'The Coffee Collective', hint:'Jægersborggade', category:'cafe', notes:''},
+{city:'copenhagen', name:'Keramiker Inge Vincents', hint:'Jægersborggade', category:'shopping', notes:''},
+{city:'copenhagen', name:'Second Beat Records', hint:'Jagtvej', category:'shopping', notes:''},
+{city:'copenhagen', name:'Palmspree', hint:'Stefansgade 10', category:'shopping', notes:'Well-regarded contemporary record store.'},
+{city:'copenhagen', name:'Le Fix streetwear Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'Won Hundred store Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'flacoDesign Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'Ladyfingers store Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'da capo vintage', hint:'Elmegade 17', category:'shopping', notes:''},
+{city:'copenhagen', name:'CHAMOI Vintage Store', hint:'Elmegade 2', category:'shopping', notes:''},
+{city:'copenhagen', name:'Jazzhouse Copenhagen', category:'bar', notes:'Flagship jazz club, central.'},
+{city:'copenhagen', name:'Mirabelle bakery Copenhagen', category:'cafe', notes:'Cardamom buns and pastries.'},
+{city:'copenhagen', name:'Frederiksberg Runddel', category:'shopping', notes:'Saturday flea market.'},
+
+{city:'malmo', name:'Malmöhus Castle', category:'attraction', notes:'Malmö Museer inside.'},
+{city:'malmo', name:'Grynbodagatan 9 Malmö', category:'attraction', notes:"Natalia Rak & Ola Kalnin 'Magic Book' mural, Gamla Staden."},
+{city:'malmo', name:'Sounds on Vinyl', hint:'Krusegatan 23', category:'shopping', notes:''},
+{city:'malmo', name:'Jord café Malmö', hint:'Falsterbogatan 1', category:'cafe', notes:"All-vegan café, famous 'cloud-like' pancakes."},
+{city:'malmo', name:'Manto restaurant Malmö', hint:'Nobelvägen 4', category:'restaurant', notes:'All-vegan, Afghan-meets-Asian, standout dinner candidate.'},
+{city:'malmo', name:'Kontrast restaurant Malmö', hint:'Möllevångstorget 6B', category:'restaurant', notes:'Punjabi/Indian, vegetarian-strong.'},
+{city:'malmo', name:'Two Forks Malmö', hint:'Gibraltargatan 3', category:'restaurant', notes:'Noted for exceptional hummus.'},
+{city:'malmo', name:'The Vegan Bar Malmö', hint:'Södra Skolgatan 45', category:'restaurant', notes:'All-vegan burgers/fries.'},
+{city:'malmo', name:'Metro bar Malmö', hint:'Ängelholmsgatan 14', category:'bar', notes:'Cozy bar, well-reviewed vegan cabbage pudding.'},
+{city:'malmo', name:'Laziza Malmö', hint:'Baltzarsgatan 21', category:'restaurant', notes:'Lebanese buffet + weekend brunch. Malmö has multiple locations — confirm this is the intended one.'},
+{city:'malmo', name:"Nansi's Bageri", hint:'Simrishamnsgatan 10', category:'cafe', notes:'Legendary local bakery, sesame bread, vegan baklava.'},
+{city:'malmo', name:'Beyond Retro Mitt Möllan', hint:'Claesgatan 8', category:'shopping', notes:''},
+{city:'malmo', name:'Love Street Vintage', hint:'Kärleksgatan 5', category:'shopping', notes:''},
+{city:'malmo', name:'Pop Boutique Malmö', hint:'Davidshallsgatan 9', category:'shopping', notes:''},
+{city:'malmo', name:'Rad Susie', hint:'Storgatan 39', category:'shopping', notes:''},
+{city:'malmo', name:'Folkets Park Malmö', hint:'Amiralsgatan 35', category:'attraction', notes:"Sweden's oldest amusement park."},
+
+{city:'stockholm', name:'Svenskt Tenn', hint:'Strandvägen 5', category:'shopping', notes:'Josef Frank textiles/furniture, worth it just to browse.'},
+{city:'stockholm', name:'Stockholm Public Library Stadsbiblioteket', category:'attraction', notes:"Asplund's circular library."},
+{city:'stockholm', name:'Grandpa store Stockholm', hint:'Södermannagatan 21', category:'shopping', notes:'Signature SoFo lifestyle/design/vintage store.'},
+{city:'stockholm', name:'Konst-ig Konstbokhandel', category:'shopping', notes:'Art/architecture/photography bookstore.'},
+{city:'stockholm', name:'Pet Sounds Records', hint:'Skånegatan 53', category:'shopping', notes:'Legendary indie/punk/garage shop.'},
+{city:'stockholm', name:'Bondegatan Erstagatan Stockholm', category:'attraction', notes:'Corner with the most photographed large murals.'},
+{city:'stockholm', name:'Snickars Records', hint:'Hökens gata 11', category:'shopping', notes:"Named one of the world's best record shops."},
+{city:'stockholm', name:'Arkivet vintage store', hint:'Norrtullsgatan 33', category:'shopping', notes:'Standout vintage/secondhand shop, near Odenplan.'},
+{city:'stockholm', name:'Swedish Museum of Performing Arts Scenkonstmuseet', category:'attraction', notes:'Instrument history, hands-on, kid-friendly.'},
+{city:'stockholm', name:'Debaser Nova', category:'bar', notes:'Live venue.'},
+{city:'stockholm', name:'Fasching jazz club Stockholm', category:'bar', notes:''},
+{city:'stockholm', name:'Rosendals Trädgård', hint:'Djurgården', category:'cafe', notes:'Biodynamic garden café, own bakery.'},
+{city:'stockholm', name:'Hornstulls Marknad', category:'area', notes:'Big weekend flea/vintage market on the water, runs through Oct 11.'}
+];
+
+document.getElementById('count').textContent = PLACES.length + ' places to retry.';
+
+function esc(s) { return (s || '').replace(/'/g, "''"); }
+function log(msg, cls) {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function tryQuery(q, cfg) {
+  const params = new URLSearchParams({ format: 'json', q, limit: '1', countrycodes: cfg.countrycodes, viewbox: cfg.viewbox });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), address: data[0].display_name };
+}
+
+async function geocodeOne(place) {
+  const cfg = CITIES[place.city];
+  // Address-first if we have one — more reliable than a fuzzy business name.
+  if (place.hint) {
+    const addrOnly = await tryQuery(`${place.hint}, ${cfg.suffix}`, cfg);
+    if (addrOnly) return { result: addrOnly, via: 'address-only' };
+    await sleep(2500);
+  }
+  const withName = await tryQuery((place.hint ? `${place.name}, ${place.hint}` : place.name) + `, ${cfg.suffix}`, cfg);
+  if (withName) return { result: withName, via: 'name+address' };
+  return null;
+}
+
+document.getElementById('startBtn').onclick = async () => {
+  document.getElementById('startBtn').disabled = true;
+  const rows = [];
+  const stillMissed = [];
+  for (let i = 0; i < PLACES.length; i++) {
+    const p = PLACES[i];
+    document.getElementById('progress').textContent = `${i + 1} / ${PLACES.length} — ${p.name}`;
+    try {
+      const outcome = await geocodeOne(p);
+      if (outcome) {
+        rows.push({ ...p, ...outcome.result });
+        log(`OK  ${p.name} (${outcome.via}) → ${outcome.result.lat.toFixed(4)}, ${outcome.result.lng.toFixed(4)}`, 'ok');
+      } else {
+        stillMissed.push(p);
+        log(`MISS ${p.name} — no result even on retry`, 'warn');
+      }
+    } catch (e) {
+      stillMissed.push(p);
+      log(`ERROR ${p.name} — ${e.message}`, 'warn');
+    }
+    await sleep(2500); // slower than batch 1's 1.1s
+  }
+
+  let sql = `-- Tripline location import — batch 2 (retry), generated ${new Date().toISOString()}\n`;
+  sql += `-- ${rows.length} recovered, ${stillMissed.length} still missing after retry.\n\n`;
+  sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
+  sql += rows.map(r =>
+    `  ('${esc(r.name)}', '${esc(r.address)}', '${r.category}', ${r.lat}, ${r.lng}, ${r.notes ? `'${esc(r.notes)}'` : 'NULL'}, false, '${r.city}')`
+  ).join(',\n') + ';\n';
+
+  if (stillMissed.length) {
+    sql += `\n-- STILL MISSING after retry — add these manually via the app's own search:\n`;
+    stillMissed.forEach(p => { sql += `--   [${p.city}] ${p.name}${p.hint ? ' (' + p.hint + ')' : ''}\n`; });
+  }
+
+  document.getElementById('output').value = sql;
+  document.getElementById('progress').textContent = `Done — ${rows.length} recovered, ${stillMissed.length} still missing.`;
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('startBtn').textContent = 'Run again';
+};
+</script>
+</body>
+</html>
