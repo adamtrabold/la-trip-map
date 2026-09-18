@@ -1,13 +1,17 @@
+# Tripper
+
 [Status: Supabase archived due to inactivity, so will not work until I activate for the next trip :)]
 
-Map view of places we may want to visit in LA. claude pulls from an apple note screenshot, finds addresses, puts them in supabase. this is an ugly but functional view on their physical location, complete with location access so we can take advantage when another thing we thought might be cool is near where we currently are.
+Map view of places we may want to visit on a trip — currently LA, Reykjavík, Copenhagen, Malmö and Stockholm. claude pulls from an apple note screenshot, finds addresses, puts them in supabase. this is an ugly but functional view on their physical location, complete with location access so we can take advantage when another thing we thought might be cool is near where we currently are.
+
+Switch cities from the filter panel; "All cities" frames everything saved. Each location is tagged with the city it belongs to, and the add-location form has its own city picker that drives both geocoding and the stored row.
 
 ## Features
 
-- 🗺️ Interactive map of Los Angeles locations
+- 🗺️ Interactive multi-city map (LA, Reykjavík, Copenhagen, Malmö, Stockholm)
 - 📍 Add, view, and manage points of interest
 - ✅ Mark locations as visited
-- 🔍 Filter by category (restaurants, cafes, bars, attractions, etc.)
+- 🔍 Filter by category (restaurants, cafes, bars, attractions, etc.) and by city
 - 📱 Mobile-friendly with geolocation support
 - 🔐 Public read access, authenticated modifications
 
