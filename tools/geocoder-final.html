@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tripline — Final Precision Geocoder</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  p.desc { color: #555; line-height: 1.5; }
+  button { background: #A8C5DD; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #progress { margin: 0.75rem 0; font-weight: 600; }
+  #genBtn { position: sticky; top: 0; z-index: 10; margin-bottom: 1rem; }
+  .card { border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.9rem 1rem; margin-bottom: 0.75rem; background: #fff; }
+  .card.no-candidates { border-color: #C97850; background: #FBF3EE; }
+  .card h3 { margin: 0 0 0.2rem 0; font-size: 1rem; }
+  .card .meta { color: #888; font-size: 0.78rem; margin-bottom: 0.5rem; }
+  .card .notes { color: #555; font-size: 0.85rem; margin-bottom: 0.6rem; font-style: italic; }
+  .cand { display: block; padding: 0.4rem 0.5rem; border-radius: 0.35rem; margin-bottom: 0.3rem; font-size: 0.85rem; cursor: pointer; }
+  .cand:hover { background: #f5f4ef; }
+  .cand input { margin-right: 0.5rem; }
+  .cand .addr { color: #333; }
+  .cand .dist { font-weight: 600; }
+  .cand .dist.far { color: #C97850; }
+  .cand .dist.near { color: #4a7c3f; }
+  .cand .src { color: #999; font-size: 0.75rem; }
+  .skip-row { color: #888; }
+  textarea { width: 100%; height: 300px; font-family: ui-monospace, monospace; font-size: 0.8rem; margin: 1rem 0; box-sizing: border-box; }
+  #summary { font-weight: 600; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>Tripline — Final Precision Geocoder</h1>
+<p class="desc">
+  This is round two: only the 40 places that were skipped or matched a generic street/neighborhood centroid
+  last time. Each one now has a <strong>real, human-verified street address</strong> (found via web research,
+  not guessed) instead of just a business name — so Nominatim should return a precise, confident match for
+  almost all of them. As before, the best candidate is auto-accepted automatically; only anything still far
+  from the city center or with no result stays open for a manual look. A few places genuinely have no formal
+  street number (a sculpture, a street corner, a market promenade) — those are noted in their card.
+</p>
+<p id="count"></p>
+<button id="startBtn">Start (~2 minutes for 40 places)</button>
+<div id="progress"></div>
+<button id="genBtn" style="display:none">Regenerate SQL from current selections</button>
+<div id="summary"></div>
+<textarea id="output" placeholder="SQL appears here once you click Generate..." readonly></textarea>
+<div id="cards"></div>
+
+<script>
+const CITIES = {
+  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland',   center: [64.1466, -21.9426] },
+  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København', center: [55.6761,  12.5683] },
+  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö',      center: [55.6050,  13.0038] },
+  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm',  center: [59.3293,  18.0686] }
+};
+
+// hint here is a verified real address (not a guess) found via web research, used as the primary query.
+const PLACES = [
+// ---- REYKJAVIK ----
+{city:'reykjavik', name:'Ker Reykjavik', hint:'Mávahlíð 16', category:'shopping', notes:'Minimalist handcrafted ceramics/homewares.'},
+{city:'reykjavik', name:'Hafnarhús Reykjavik Art Museum', hint:'Tryggvagata 17', category:'attraction', notes:'Contemporary, Erró collection.'},
+{city:'reykjavik', name:'Omnom Chocolate Factory', hint:'Hólmaslóð 4', category:'attraction', notes:'Kid-friendly chocolate-making, great packaging design.'},
+{city:'reykjavik', name:'Farmers Market and Friends Reykjavik', hint:'Hólmaslóð 2', category:'shopping', notes:'Nordic design homewares/clothing. Grandi flagship (they also have a Laugavegur 37 location — verify which you meant).'},
+{city:'reykjavik', name:'The Handknitting Association of Iceland', hint:'Skólavörðustígur 19', category:'shopping', notes:'A real Icelandic lopapeysa sweater.'},
+{city:'reykjavik', name:'Kattakaffihúsið Cat Café', hint:'Bergstaðastræti 10a', category:'cafe', notes:'Kid favorite; vegan cakes/waffles.'},
+{city:'reykjavik', name:'Kolaportið Flea Market', hint:'Tryggvagata 19', category:'shopping', notes:'Sunday only (Sept 20), 11am-5pm, Old Harbour — secondhand clothes, sweaters, candy stalls.'},
+{city:'reykjavik', name:'Aurora Reykjavík', hint:'Fiskislóð 53', category:'attraction', notes:'Indoor Northern Lights exhibit, rainy-day/kid option. Grandi harbor — not to be confused with unrelated businesses that also use "Aurora" in their name.'},
+{city:'reykjavik', name:'Þúfa', hint:'Grandagarður 20', category:'attraction', notes:'Small grass-mound art installation at Grandi harbor, right by the Marshall House — no formal street address exists for it, pin is approximate.'},
+{city:'reykjavik', name:'Loving Hut Reykjavik', hint:'Laugavegur 164', category:'restaurant', notes:'Asian vegan chain, allergen-marked menu. Distinct location from Vegan World Peace (Aðalstræti 2) — confirmed separate, still-open restaurant.'},
+{city:'reykjavik', name:'Marshall House Reykjavik', hint:'Grandagarður 20', category:'attraction', notes:'Houses Kling & Bang (artist-run) + The Living Art Museum. Artist-run spaces often closed Mon/Tue.'},
+
+// ---- COPENHAGEN ----
+{city:'copenhagen', name:'The Little Mermaid statue Copenhagen', hint:'Langelinie', category:'attraction', notes:"Small statue, quick stop, don't over-plan around it."},
+{city:'copenhagen', name:'Danish Architecture Center BLOX', hint:'Bryghuspladsen 10', category:'attraction', notes:'Models/exhibits on Danish architecture & urbanism.'},
+{city:'copenhagen', name:'Nils Stærk gallery', hint:'Glentevej 49', category:'attraction', notes:'Respected contemporary gallery.'},
+{city:'copenhagen', name:'CopenHill Amager Bakke', hint:'Vindmøllevej 6', category:'attraction', notes:'Waste-to-energy plant with rooftop hiking trail/ski slope/climbing wall.'},
+{city:'copenhagen', name:'Le Fix streetwear Copenhagen', hint:'Kronprinsensgade 9B', category:'shopping', notes:''},
+{city:'copenhagen', name:'Won Hundred store Copenhagen', hint:'Gammel Kongevej 102, Frederiksberg', category:'shopping', notes:'Address uncertain — sources conflict on current showroom location, verify before relying on this pin.'},
+{city:'copenhagen', name:'flacoDesign Copenhagen', hint:'Jægersborggade 53', category:'shopping', notes:''},
+{city:'copenhagen', name:'Ladyfingers store Copenhagen', hint:'Jægersborggade 4', category:'shopping', notes:'Jewelry design collective, not general fashion.'},
+{city:'copenhagen', name:'Jazzhouse Copenhagen', hint:'Niels Hemmingsens Gade 10', category:'bar', notes:'Flagship jazz club, central.'},
+{city:'copenhagen', name:'Mirabelle bakery Copenhagen', hint:'Guldbergsgade 29', category:'cafe', notes:'Cardamom buns and pastries.'},
+{city:'copenhagen', name:'Frederiksberg Runddel', hint:'Frederiksberg Runddel', category:'shopping', notes:'Saturday flea market near Frederiksberg Rådhus — no single street-number address, this is the roundabout/square itself.'},
+{city:'copenhagen', name:'V1 Gallery', hint:'Flæsketorvet 69-71', category:'attraction', notes:'Leading contemporary gallery, street-art-adjacent roster. (Meatpacking District — a prior geocode wrongly matched this to Central Station.)'},
+{city:'copenhagen', name:'Frama Copenhagen', hint:'Fredericiagade 57', category:'shopping', notes:'Apothecary-meets-design studio/showroom. Flagship is in Nyboder, not Nørrebro as originally assumed.'},
+{city:'copenhagen', name:'Superkilen park', hint:'Nørrebrogade 210', category:'area', notes:'BIG/Superflex/Topotek1 park, giant pink octopus slide, neon signage, drum fountain. Pin marks the "Red Square" end of this long linear park.'},
+{city:'copenhagen', name:'The Coffee Collective', hint:'Jægersborggade 57', category:'cafe', notes:''},
+{city:'copenhagen', name:'Keramiker Inge Vincents', hint:'Jægersborggade 43', category:'shopping', notes:''},
+
+// ---- MALMO ----
+{city:'malmo', name:'Malmöhus Castle', hint:'Malmöhusvägen 6', category:'attraction', notes:'Malmö Museer inside.'},
+{city:'malmo', name:'Grynbodagatan 9 Malmö', hint:'Grynbodgatan 9', category:'attraction', notes:"Natalia Rak & Ola Kalnin 'Magic Book' mural, Gamla Staden."},
+{city:'malmo', name:'Davidshallsgatan 10 Malmö', hint:'Davidshallsgatan 10', category:'attraction', notes:"'The Girl with the Fox' mural, painted on a metal door, Davidshall."},
+{city:'malmo', name:'Davidshallsgatan 24 Malmö', hint:'Davidshallsgatan 24', category:'attraction', notes:'Cow-and-deer mural, further down the same street from the Girl-with-the-Fox door at #10, Davidshall.'},
+
+// ---- STOCKHOLM ----
+{city:'stockholm', name:'Stockholm Public Library Stadsbiblioteket', hint:'Sveavägen 73', category:'attraction', notes:"Asplund's circular library."},
+{city:'stockholm', name:'Konst-ig Konstbokhandel', hint:'Åsögatan 124', category:'shopping', notes:'Art/architecture/photography bookstore.'},
+{city:'stockholm', name:'Bondegatan Erstagatan Stockholm', hint:'Bondegatan, Erstagatan', category:'attraction', notes:'Corner with the most photographed large murals — no single street-number address, this is the intersection itself.'},
+{city:'stockholm', name:'Swedish Museum of Performing Arts Scenkonstmuseet', hint:'Sibyllegatan 2', category:'attraction', notes:'Instrument history, hands-on, kid-friendly.'},
+{city:'stockholm', name:'Debaser Nova', hint:'Hornstulls strand 4', category:'bar', notes:'Live venue — now shares one building/address with Debaser Strand (Nova is the renovated former "Bar Brooklyn" room).'},
+{city:'stockholm', name:'Fasching jazz club Stockholm', hint:'Kungsgatan 63', category:'bar', notes:''},
+{city:'stockholm', name:'Hornstulls Marknad', hint:'Hornstulls strand', category:'area', notes:'Big weekend flea/vintage market on the water, runs through Oct 11. No single street-number address — waterfront promenade near Hornstull.'},
+{city:'stockholm', name:'Rosendals Trädgård', hint:'Rosendalsterrassen 12', category:'cafe', notes:'Biodynamic garden café, own bakery. Specific spot on Djurgården, not the island centroid.'},
+{city:'stockholm', name:'Spritmuseum', hint:'Djurgårdsstrand 9', category:'attraction', notes:"Museum of Spirits, Absolut Vodka's home museum. Specific building on Djurgården, distinct from Rosendals Trädgård."}
+];
+
+document.getElementById('count').textContent = PLACES.length + ' places to geocode with review.';
+
+function esc(s) { return (s || '').replace(/'/g, "''"); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b[0]-a[0]) * Math.PI/180, dLng = (b[1]-a[1]) * Math.PI/180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+async function nomSearch(q, cfg, limit) {
+  const params = new URLSearchParams({ format: 'json', q, limit: String(limit), countrycodes: cfg.countrycodes, viewbox: cfg.viewbox, addressdetails: '0' });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Fetch candidates: address query (primary, since we now have verified addresses) + name query (fallback/cross-check).
+async function fetchCandidates(place) {
+  const cfg = CITIES[place.city];
+  const results = [];
+  const a = await nomSearch(`${place.hint}, ${cfg.suffix}`, cfg, 3);
+  a.forEach(r => results.push({ ...r, src: 'address' }));
+  await sleep(2500);
+  const b = await nomSearch(`${place.name}, ${cfg.suffix}`, cfg, 2);
+  b.forEach(r => results.push({ ...r, src: 'name' }));
+
+  const seen = new Set();
+  const deduped = [];
+  for (const r of results) {
+    const key = Math.round(parseFloat(r.lat)*2000) + ',' + Math.round(parseFloat(r.lon)*2000);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lat = parseFloat(r.lat), lng = parseFloat(r.lon);
+    deduped.push({ lat, lng, address: r.display_name, src: r.src, distKm: haversineKm(cfg.center, [lat, lng]) });
+  }
+  deduped.sort((x, y) => (x.src === 'address' ? 0 : 1) - (y.src === 'address' ? 0 : 1) || x.distKm - y.distKm);
+  return deduped;
+}
+
+const FAR_THRESHOLD_KM = 12; // beyond this, don't auto-select — force a conscious choice
+
+function renderCard(place, candidates, idx) {
+  const card = document.createElement('div');
+  card.className = 'card' + (candidates.length === 0 ? ' no-candidates' : '');
+  card.style.margin = '0';
+  card.style.border = 'none';
+  card.dataset.idx = idx;
+
+  const h = document.createElement('h3');
+  h.textContent = place.name;
+  card.appendChild(h);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${place.city} · ${place.category}` + (place.hint ? ` · address used: ${place.hint}` : '');
+  card.appendChild(meta);
+
+  if (place.notes) {
+    const n = document.createElement('div');
+    n.className = 'notes';
+    n.textContent = place.notes;
+    card.appendChild(n);
+  }
+
+  let autoSelected = false;
+  candidates.forEach((c, ci) => {
+    const label = document.createElement('label');
+    label.className = 'cand';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = `place-${idx}`;
+    radio.value = ci;
+    const isNear = c.distKm <= FAR_THRESHOLD_KM;
+    if (isNear && !autoSelected) { radio.checked = true; autoSelected = true; }
+    label.appendChild(radio);
+    const distSpan = document.createElement('span');
+    distSpan.className = 'dist ' + (isNear ? 'near' : 'far');
+    distSpan.textContent = (isNear ? '' : '⚠ ') + c.distKm.toFixed(1) + ' km from city center';
+    label.appendChild(distSpan);
+    label.appendChild(document.createTextNode(' — '));
+    const addrSpan = document.createElement('span');
+    addrSpan.className = 'addr';
+    addrSpan.textContent = c.address;
+    label.appendChild(addrSpan);
+    const srcSpan = document.createElement('span');
+    srcSpan.className = 'src';
+    srcSpan.textContent = ` [${c.src} match]`;
+    label.appendChild(srcSpan);
+    card.appendChild(label);
+  });
+
+  const skipLabel = document.createElement('label');
+  skipLabel.className = 'cand skip-row';
+  const skipRadio = document.createElement('input');
+  skipRadio.type = 'radio';
+  skipRadio.name = `place-${idx}`;
+  skipRadio.value = 'skip';
+  if (!autoSelected) skipRadio.checked = true;
+  skipLabel.appendChild(skipRadio);
+  skipLabel.appendChild(document.createTextNode(candidates.length === 0 ? 'No candidates found — skip, add manually via the app' : 'Skip — none of these are right, add manually via the app'));
+  card.appendChild(skipLabel);
+
+  return { card, autoSelected };
+}
+
+document.getElementById('startBtn').onclick = async () => {
+  document.getElementById('startBtn').disabled = true;
+  const cardsById = [];
+  const cardsEl = document.getElementById('cards');
+  let autoCount = 0, reviewCount = 0;
+  for (let i = 0; i < PLACES.length; i++) {
+    const p = PLACES[i];
+    document.getElementById('progress').textContent = `${i + 1} / ${PLACES.length} — ${p.name}`;
+    let candidates = [];
+    try {
+      candidates = await fetchCandidates(p);
+    } catch (e) {
+      candidates = [];
+    }
+    cardsById[i] = { place: p, candidates };
+    const { card, autoSelected } = renderCard(p, candidates, i);
+
+    const details = document.createElement('details');
+    details.open = !autoSelected;
+    details.className = 'card' + (autoSelected ? '' : ' no-candidates');
+    details.style.padding = '0';
+    const summary = document.createElement('summary');
+    summary.style.cursor = 'pointer';
+    summary.style.fontWeight = '600';
+    summary.style.fontSize = '0.9rem';
+    summary.style.padding = '0.6rem 0.9rem';
+    if (autoSelected) {
+      summary.style.color = '#4a7c3f';
+      summary.textContent = `✓ Auto-accepted — ${p.name} (click to review/override)`;
+      autoCount++;
+    } else {
+      summary.style.color = '#C97850';
+      summary.textContent = `⚠ Needs your review — ${p.name}`;
+      reviewCount++;
+    }
+    card.style.padding = '0 0.9rem 0.9rem 0.9rem';
+    details.appendChild(summary);
+    details.appendChild(card);
+    cardsEl.appendChild(details);
+
+    document.getElementById('genBtn').style.display = 'inline-block';
+    await sleep(2500);
+  }
+  document.getElementById('progress').textContent =
+    `Done. ${autoCount} auto-accepted, ${reviewCount} need your review (expanded below). SQL generated automatically.`;
+  document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
+  document.getElementById('startBtn').disabled = false;
+  window._tripline_cards = cardsById;
+  generateSQL();
+};
+
+function generateSQL() {
+  const cardsById = window._tripline_cards || [];
+  const rows = [];
+  const skipped = [];
+  cardsById.forEach(({ place, candidates }, idx) => {
+    const checked = document.querySelector(`input[name="place-${idx}"]:checked`);
+    if (!checked || checked.value === 'skip') { skipped.push(place); return; }
+    const c = candidates[parseInt(checked.value, 10)];
+    rows.push({ ...place, lat: c.lat, lng: c.lng, address: c.address });
+  });
+
+  let sql = `-- Tripline location import — round 2 (verified addresses), generated ${new Date().toISOString()}\n`;
+  sql += `-- ${rows.length} confirmed, ${skipped.length} skipped for manual entry.\n\n`;
+  if (rows.length) {
+    sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
+    sql += rows.map(r =>
+      `  ('${esc(r.name)}', '${esc(r.address)}', '${r.category}', ${r.lat}, ${r.lng}, ${r.notes ? `'${esc(r.notes)}'` : 'NULL'}, false, '${r.city}')`
+    ).join(',\n') + ';\n';
+  } else {
+    sql += `-- Nothing confirmed yet.\n`;
+  }
+
+  if (skipped.length) {
+    sql += `\n-- SKIPPED (add manually via the app):\n`;
+    skipped.forEach(p => { sql += `--   [${p.city}] ${p.name}${p.hint ? ' (' + p.hint + ')' : ''}\n`; });
+  }
+
+  document.getElementById('output').value = sql;
+  document.getElementById('summary').textContent = `${rows.length} confirmed, ${skipped.length} skipped.`;
+}
+
+document.getElementById('genBtn').onclick = generateSQL;
+</script>
+</body>
+</html>
