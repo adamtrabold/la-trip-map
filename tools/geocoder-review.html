@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tripline — Geocoder with Review</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  p.desc { color: #555; line-height: 1.5; }
+  button { background: #A8C5DD; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #progress { margin: 0.75rem 0; font-weight: 600; }
+  #genBtn { position: sticky; top: 0; z-index: 10; margin-bottom: 1rem; }
+  .card { border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.9rem 1rem; margin-bottom: 0.75rem; background: #fff; }
+  .card.no-candidates { border-color: #C97850; background: #FBF3EE; }
+  .card h3 { margin: 0 0 0.2rem 0; font-size: 1rem; }
+  .card .meta { color: #888; font-size: 0.78rem; margin-bottom: 0.5rem; }
+  .card .notes { color: #555; font-size: 0.85rem; margin-bottom: 0.6rem; font-style: italic; }
+  .cand { display: block; padding: 0.4rem 0.5rem; border-radius: 0.35rem; margin-bottom: 0.3rem; font-size: 0.85rem; cursor: pointer; }
+  .cand:hover { background: #f5f4ef; }
+  .cand input { margin-right: 0.5rem; }
+  .cand .addr { color: #333; }
+  .cand .dist { font-weight: 600; }
+  .cand .dist.far { color: #C97850; }
+  .cand .dist.near { color: #4a7c3f; }
+  .cand .src { color: #999; font-size: 0.75rem; }
+  .skip-row { color: #888; }
+  textarea { width: 100%; height: 300px; font-family: ui-monospace, monospace; font-size: 0.8rem; margin: 1rem 0; box-sizing: border-box; }
+  #summary { font-weight: 600; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>Tripline — Geocoder with Review</h1>
+<p class="desc">
+  Fetches up to 4 Nominatim candidates per place (address-only AND name-based when an address is known, merged
+  together) instead of blindly trusting result #1. Every candidate shows its distance from that city's center —
+  anything implausibly far is flagged and <strong>not</strong> pre-selected, so a wrong match (like a same-named
+  place in a different town) can't slip through silently. Runs at 1 request per 2.5 seconds. Review/change any
+  selection, then generate the SQL whenever you're satisfied — you can regenerate as many times as you like
+  without re-fetching.
+</p>
+<p id="count"></p>
+<button id="startBtn">Start (~7 minutes for ~160 places)</button>
+<div id="progress"></div>
+<button id="genBtn" style="display:none">Generate SQL from current selections</button>
+<div id="summary"></div>
+<textarea id="output" placeholder="SQL appears here once you click Generate..." readonly></textarea>
+<div id="cards"></div>
+
+<script>
+const CITIES = {
+  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland',   center: [64.1466, -21.9426] },
+  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København', center: [55.6761,  12.5683] },
+  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö',      center: [55.6050,  13.0038] },
+  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm',  center: [59.3293,  18.0686] }
+};
+
+// name: display name · hint: extra address text to disambiguate the search (optional)
+// category: one of restaurant, cafe, bar, attraction, nature, shopping, area, hotel, other
+// notes: shown in the app popup/card
+const PLACES = [
+// ---- REYKJAVIK ----
+{city:'reykjavik', name:'Hallgrímskirkja', category:'attraction', notes:'Church tower viewpoint over the city.'},
+{city:'reykjavik', name:'Harpa', category:'attraction', notes:"Concert hall; honeycomb glass facade co-designed with Ólafur Elíasson. Sun Sept 20: Youth Orchestra 'Scheherazade' 2pm, Negla Piano Quartet 4pm."},
+{city:'reykjavik', name:'Sólfar Sun Voyager', category:'attraction', notes:'Sun Voyager sculpture on the waterfront.'},
+{city:'reykjavik', name:'Old Harbour Reykjavik', hint:'Grandi', category:'area', notes:'Old Harbour creative district — anchor for the Grandi neighborhood picks.'},
+{city:'reykjavik', name:'Laugavegur', category:'area', notes:'Main shopping/nightlife street — anchor for the Laugavegur neighborhood picks.'},
+{city:'reykjavik', name:'Perlan', category:'attraction', notes:'Planetarium + ice cave, good with a kid.'},
+{city:'reykjavik', name:'Kirsuberjatréð', category:'shopping', notes:"Women artists' design co-op: jewelry, textiles, ceramics, not tourist kitsch."},
+{city:'reykjavik', name:'Kogga Ceramic Studio', hint:'Vesturgata', category:'shopping', notes:"Working potters' studio/gallery, Vesturgata."},
+{city:'reykjavik', name:'Ker Reykjavik', category:'shopping', notes:'Minimalist handcrafted ceramics/homewares.'},
+{city:'reykjavik', name:'Fischersund', category:'shopping', notes:'Apothecary/perfumery co-run by Jónsi of Sigur Rós, art-filled space.'},
+{city:'reykjavik', name:'Marshall House Reykjavik', hint:'Grandi', category:'attraction', notes:'Houses Kling & Bang (artist-run) + The Living Art Museum. Artist-run spaces often closed Mon/Tue.'},
+{city:'reykjavik', name:'Hafnarhús Reykjavik Art Museum', category:'attraction', notes:'Contemporary, Erró collection.'},
+{city:'reykjavik', name:'Kjarvalsstaðir', category:'attraction', notes:'Painter Kjarval, park setting.'},
+{city:'reykjavik', name:'Ásmundarsafn', category:'attraction', notes:"Sculptor's dome house, good for a kid to run around outside."},
+{city:'reykjavik', name:'12 Tónar', category:'shopping', notes:'Listening-room record shop, free coffee, strong Icelandic/indie selection.'},
+{city:'reykjavik', name:'Lucky Records Reykjavik', category:'shopping', notes:'Bigger, crate-digger vibe, large secondhand vinyl selection.'},
+{city:'reykjavik', name:'Grandagarður', category:'attraction', notes:'Mural street — most sophisticated large-scale murals in the city (a street to walk, not a single building).'},
+{city:'reykjavik', name:'Omnom Chocolate Factory', category:'attraction', notes:'Kid-friendly chocolate-making, great packaging design.'},
+{city:'reykjavik', name:'Kaffivagninn', category:'cafe', notes:'Oldest working-harbour café, since 1935.'},
+{city:'reykjavik', name:'KIOSK Reykjavik', category:'shopping', notes:'Icelandic fashion/textile design co-op.'},
+{city:'reykjavik', name:'Farmers Market and Friends Reykjavik', category:'shopping', notes:'Nordic design homewares/clothing.'},
+{city:'reykjavik', name:'Reykjavík Maritime Museum', category:'attraction', notes:''},
+{city:'reykjavik', name:'Aurora Reykjavík', hint:'Grandagarður', category:'attraction', notes:'Indoor Northern Lights exhibit, rainy-day/kid option. Grandi harbor — not to be confused with unrelated businesses that also use "Aurora" in their name.'},
+{city:'reykjavik', name:'Þúfa', hint:'Grandagarður', category:'attraction', notes:'Small grass-mound art installation at Grandi harbor, quick photogenic detour.'},
+{city:'reykjavik', name:'Skólavörðustígur', category:'attraction', notes:"'Rainbow Street' — best corrugated-iron color walk in the city, plus street art (a street to walk)."},
+{city:'reykjavik', name:'Klapparstígur', category:'attraction', notes:'Short lane of symmetrical painted wooden houses (a street to walk).'},
+{city:'reykjavik', name:'The Handknitting Association of Iceland', category:'shopping', notes:'A real Icelandic lopapeysa sweater.'},
+{city:'reykjavik', name:'Kattakaffihúsið Cat Café', category:'cafe', notes:'Kid favorite; vegan cakes/waffles.'},
+{city:'reykjavik', name:'Garðurinn', category:'restaurant', notes:'Cozy vegetarian café, daily soup + main.'},
+{city:'reykjavik', name:'Mama Reykjavik', category:'restaurant', notes:'Comfort food, dal, fresh juices, cakes, good family vibe.'},
+{city:'reykjavik', name:'Vegan World Peace', category:'restaurant', notes:'Asian-fusion vegan, hearty noodle dishes.'},
+{city:'reykjavik', name:'Chickpea Reykjavik', category:'restaurant', notes:'Casual falafel/salad bowls, easy quick lunch with a kid.'},
+{city:'reykjavik', name:'Loving Hut Reykjavik', category:'restaurant', notes:'Asian vegan chain, allergen-marked menu.'},
+{city:'reykjavik', name:'The Laundromat Café', category:'cafe', notes:'All-day café/bookshop-bar, vegan brunch (pancakes, tofu scramble).'},
+{city:'reykjavik', name:'Plantan Kaffihús', category:'cafe', notes:'Weekday scones/oatmeal, weekend brunch platters.'},
+{city:'reykjavik', name:'Bæjarins Beztu Pylsur', category:'restaurant', notes:'Famous hot dog stand since 1937; classic dog has lamb — ask for meat-free.'},
+{city:'reykjavik', name:'Brauð & Co', category:'cafe', notes:'Wildly colorful bakery storefront, vegan cinnamon rolls.'},
+{city:'reykjavik', name:'Kolaportið Flea Market', category:'shopping', notes:'Sunday only (Sept 20), 11am-5pm, Old Harbour — secondhand clothes, sweaters, candy stalls.'},
+{city:'reykjavik', name:'Icelandic Punk Museum', category:'attraction', notes:'Housed in an old underground public toilet near Hlemmur, open daily 10am-6pm.'},
+{city:'reykjavik', name:'Sundhöllin', category:'nature', notes:'Downtown geothermal pool, historic.'},
+{city:'reykjavik', name:'Laugardalslaug', category:'nature', notes:'Bigger geothermal pool, waterslides.'},
+
+// ---- COPENHAGEN ----
+{city:'copenhagen', name:'Nyhavn', category:'area', notes:'Iconic harbor canal front.'},
+{city:'copenhagen', name:'Tivoli Gardens', category:'attraction', notes:'Historic amusement park; Halloween season Oct 1 – Nov 1, 11am-10pm.'},
+{city:'copenhagen', name:'The Little Mermaid statue Copenhagen', category:'attraction', notes:"Small statue, quick stop, don't over-plan around it."},
+{city:'copenhagen', name:'Rosenborg Castle', category:'attraction', notes:'Castle & gardens.'},
+{city:'copenhagen', name:'Christiansborg Palace', category:'attraction', notes:'Free tower view.'},
+{city:'copenhagen', name:'Nyboder', category:'area', notes:'Ochre naval housing rows.'},
+{city:'copenhagen', name:'Amalienborg', category:'attraction', notes:'Noon guard change.'},
+{city:'copenhagen', name:'Designmuseum Danmark', category:'attraction', notes:'Flagship design museum; check for a special exhibition. Closed Mondays.'},
+{city:'copenhagen', name:'Danish Architecture Center BLOX', category:'attraction', notes:'Models/exhibits on Danish architecture & urbanism.'},
+{city:'copenhagen', name:'V1 Gallery', hint:'Vesterbro', category:'attraction', notes:'Leading contemporary gallery, street-art-adjacent roster.'},
+{city:'copenhagen', name:'Nils Stærk gallery', category:'attraction', notes:'Respected contemporary gallery.'},
+{city:'copenhagen', name:'HAY House', hint:'Østergade', category:'shopping', notes:'Flagship showroom of the Danish design brand.'},
+{city:'copenhagen', name:'Illums Bolighus', category:'shopping', notes:'Department-store survey of Danish design across price points.'},
+{city:'copenhagen', name:'Frama Copenhagen', hint:'Nørrebro', category:'shopping', notes:'Apothecary-meets-design studio/showroom.'},
+{city:'copenhagen', name:'CopenHill Amager Bakke', category:'attraction', notes:'Waste-to-energy plant with rooftop hiking trail/ski slope/climbing wall.'},
+{city:'copenhagen', name:'8 House Ørestad', category:'attraction', notes:"BIG's figure-eight residential complex."},
+{city:'copenhagen', name:'Superkilen park', hint:'Nørrebro', category:'area', notes:'BIG/Superflex/Topotek1 park, giant pink octopus slide, neon signage, drum fountain.'},
+{city:'copenhagen', name:'Jægersborggade', category:'area', notes:'The single best street to walk: food, ceramics, design, coffee.'},
+{city:'copenhagen', name:'Assistens Cemetery', category:'area', notes:'H.C. Andersen and Kierkegaard’s graves, locals picnic here.'},
+{city:'copenhagen', name:'Rentemestervej Copenhagen', category:'attraction', notes:'Mural strip, ~16 large murals (with Møntmestervej).'},
+{city:'copenhagen', name:'The Coffee Collective', hint:'Jægersborggade', category:'cafe', notes:''},
+{city:'copenhagen', name:'Keramiker Inge Vincents', hint:'Jægersborggade', category:'shopping', notes:''},
+{city:'copenhagen', name:'Second Beat Records', hint:'Jagtvej', category:'shopping', notes:''},
+{city:'copenhagen', name:'Ooh Aah Records', hint:'Ryesgade', category:'shopping', notes:''},
+{city:'copenhagen', name:'Palmspree', hint:'Stefansgade 10', category:'shopping', notes:'Well-regarded contemporary record store.'},
+{city:'copenhagen', name:'Le Fix streetwear Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'Won Hundred store Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'flacoDesign Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'Ladyfingers store Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:'Gågrøn Copenhagen', category:'shopping', notes:''},
+{city:'copenhagen', name:"Kødbyens Fiskebar", hint:'Kødbyen', category:'restaurant', notes:'Top-tier seafood restaurant.'},
+{city:'copenhagen', name:'Galleri Bo Bjerggaard', category:'attraction', notes:''},
+{city:'copenhagen', name:'Øksnehallen', category:'attraction', notes:'Former cattle hall, exhibition space.'},
+{city:'copenhagen', name:'WarPigs Copenhagen', category:'bar', notes:'Mikkeller x 3 Floyds brewpub, Texas BBQ — good for the whole family.'},
+{city:'copenhagen', name:'Hart Bageri', category:'cafe', notes:'Sourdough bakery, good kid stop.'},
+{city:'copenhagen', name:'Mother restaurant Copenhagen', category:'restaurant', notes:'Well-regarded sourdough pizza, family-friendly.'},
+{city:'copenhagen', name:'Gorilla restaurant Copenhagen', category:'restaurant', notes:'Sharing-plates restaurant.'},
+{city:'copenhagen', name:'Ravnsborggade', category:'shopping', notes:'Antiques row (Veirhanen, Gyrn Antik, Ingerslev Antik).'},
+{city:'copenhagen', name:'da capo vintage', hint:'Elmegade 17', category:'shopping', notes:''},
+{city:'copenhagen', name:'CHAMOI Vintage Store', hint:'Elmegade 2', category:'shopping', notes:''},
+{city:'copenhagen', name:'VEGA Copenhagen', category:'bar', notes:"Store VEGA, Lille VEGA, Ideal Bar — the city's premier venue. Sat Sept 26: María José Llergo (Lille VEGA), Lake Street Dive w/ Røverdatter (Store VEGA, waitlisted), KARLA w/ Asger Falgren (Ideal Bar)."},
+{city:'copenhagen', name:'Jazzhouse Copenhagen', category:'bar', notes:'Flagship jazz club, central.'},
+{city:'copenhagen', name:'Jazzhus Montmartre', category:'bar', notes:'Historic, atmospheric jazz club.'},
+{city:'copenhagen', name:'Reffen', hint:'Refshaleøen', category:'restaurant', notes:'Shipping-container street food market, strong vegetarian stalls.'},
+{city:'copenhagen', name:'Torvehallerne', category:'restaurant', notes:'Central twin food market halls, good vegetarian options.'},
+{city:'copenhagen', name:'Broens Gadekøkken', category:'restaurant', notes:'Smaller street food market near Nyhavn/the harbor.'},
+{city:'copenhagen', name:'Juno the Bakery', category:'cafe', notes:'Cardamom buns and pastries.'},
+{city:'copenhagen', name:'Mirabelle bakery Copenhagen', category:'cafe', notes:'Cardamom buns and pastries.'},
+{city:'copenhagen', name:'Freetown Christiania', category:'area', notes:'Self-governing enclave since 1971; murals, alternative architecture, Loppen venue. Avoid photographing Pusher Street.'},
+{city:'copenhagen', name:'Israels Plads', category:'shopping', notes:'Saturday flea market.'},
+{city:'copenhagen', name:'Frederiksberg Runddel', category:'shopping', notes:'Saturday flea market.'},
+
+// ---- MALMO ----
+{city:'malmo', name:'Malmöhus Castle', category:'attraction', notes:'Malmö Museer inside.'},
+{city:'malmo', name:'Turning Torso', category:'attraction', notes:'Calatrava tower, exterior only.'},
+{city:'malmo', name:'Lilla Torg', category:'area', notes:''},
+{city:'malmo', name:'Möllevångstorget', category:'area', notes:"'Möllan' — the city's most diverse, lived-in square, daily market."},
+{city:'malmo', name:'Form/Design Center Malmö', category:'shopping', notes:'Design bookshop; open Sun 1-5pm for Gallery Weekend.'},
+{city:'malmo', name:'Moderna Museet Malmö', category:'attraction', notes:'Open Sun 11-17.'},
+{city:'malmo', name:'Västra Hamnen Bo01', category:'area', notes:'Western Harbour eco-district.'},
+{city:'malmo', name:'Stenhuggaregatan Malmö', category:'attraction', notes:'Phlegm mural (Lugnet/Davidshall), Gallery Weekend.'},
+{city:'malmo', name:'Grynbodagatan 9 Malmö', hint:'Grynbodagatan 9', category:'attraction', notes:"Natalia Rak & Ola Kalnin 'Magic Book' mural, Gamla Staden."},
+{city:'malmo', name:'Södra Skolgatan Malmö', category:'attraction', notes:'Stinkfish mural, Möllevången.'},
+{city:'malmo', name:'Davidshallsgatan 10 Malmö', hint:'Davidshallsgatan 10', category:'attraction', notes:"'The Girl with the Fox' mural, Davidshall."},
+{city:'malmo', name:'Davidshallsgatan 24 Malmö', hint:'Davidshallsgatan 24', category:'attraction', notes:'Mural, Davidshall.'},
+{city:'malmo', name:'Sounds on Vinyl', hint:'Krusegatan 23', category:'shopping', notes:''},
+{city:'malmo', name:'Jord café Malmö', hint:'Falsterbogatan 1', category:'cafe', notes:"All-vegan café, famous 'cloud-like' pancakes."},
+{city:'malmo', name:'Manto restaurant Malmö', hint:'Nobelvägen 4', category:'restaurant', notes:'All-vegan, Afghan-meets-Asian, standout dinner candidate.'},
+{city:'malmo', name:'Kontrast restaurant Malmö', hint:'Möllevångstorget 6', category:'restaurant', notes:'Punjabi/Indian, vegetarian-strong.'},
+{city:'malmo', name:'Two Forks Malmö', hint:'Gibraltargatan 3', category:'restaurant', notes:'Noted for exceptional hummus.'},
+{city:'malmo', name:'The Vegan Bar Malmö', hint:'Södra Skolgatan 45', category:'restaurant', notes:'All-vegan burgers/fries.'},
+{city:'malmo', name:'Metro bar Malmö', hint:'Ängelholmsgatan 14', category:'bar', notes:'Cozy bar, well-reviewed vegan cabbage pudding.'},
+{city:'malmo', name:'Laziza Malmö', hint:'Baltzarsgatan 21', category:'restaurant', notes:'Lebanese buffet + weekend brunch. Malmö has multiple locations — confirm this is the intended one.'},
+{city:'malmo', name:"Nansi's Bageri", hint:'Simrishamnsgatan 10', category:'cafe', notes:'Legendary local bakery, sesame bread, vegan baklava.'},
+{city:'malmo', name:'Beyond Retro Mitt Möllan', hint:'Claesgatan 8', category:'shopping', notes:''},
+{city:'malmo', name:'Love Street Vintage', hint:'Kärleksgatan 5', category:'shopping', notes:''},
+{city:'malmo', name:'Pop Boutique Malmö', hint:'Davidshallsgatan 9', category:'shopping', notes:''},
+{city:'malmo', name:'Rad Susie', hint:'Storgatan 39', category:'shopping', notes:''},
+{city:'malmo', name:'Slottsparken Malmö', category:'nature', notes:'Swan pond, stroller-friendly (Kungsparken).'},
+{city:'malmo', name:'Folkets Park Malmö', hint:'Amiralsgatan 35', category:'attraction', notes:"Sweden's oldest amusement park."},
+
+// ---- STOCKHOLM ----
+{city:'stockholm', name:'Gamla Stan', category:'area', notes:'Old town, Royal Palace.'},
+{city:'stockholm', name:'Vasa Museum', category:'attraction', notes:'1628 warship.'},
+{city:'stockholm', name:'Skansen', category:'attraction', notes:'Open-air museum/zoo/village. Reduced autumn hours start Sept 28 — go before then if possible.'},
+{city:'stockholm', name:'Stockholm City Hall', category:'attraction', notes:'Nobel banquet hall, tower tour.'},
+{city:'stockholm', name:'Djurgården', category:'area', notes:'Museum island.'},
+{city:'stockholm', name:'Svenskt Tenn', hint:'Strandvägen 5', category:'shopping', notes:'Josef Frank textiles/furniture, worth it just to browse.'},
+{city:'stockholm', name:'ArkDes', hint:'Skeppsholmen', category:'attraction', notes:'Swedish national center for architecture & design.'},
+{city:'stockholm', name:'Moderna Museet Stockholm', category:'attraction', notes:"'Brassaï' closes Oct 4; 'Monir Shahroudy Farmanfarmaian' opens Oct 3."},
+{city:'stockholm', name:'Fotografiska', category:'attraction', notes:'Photography museum, Södermalm waterfront. Lebohang Kganye (through Oct 18), Lotta Antonsson (through Nov 29).'},
+{city:'stockholm', name:'Stockholm Public Library Stadsbiblioteket', category:'attraction', notes:"Asplund's circular library."},
+{city:'stockholm', name:'Skogskyrkogården', category:'area', notes:'UNESCO cemetery, design pilgrimage site.'},
+{city:'stockholm', name:'Nytorget Stockholm', category:'area', notes:'Social heart of SoFo.'},
+{city:'stockholm', name:'Grandpa store Stockholm', hint:'Södermannagatan 21', category:'shopping', notes:'Signature SoFo lifestyle/design/vintage store.'},
+{city:'stockholm', name:'Konst-ig Konstbokhandel', category:'shopping', notes:'Art/architecture/photography bookstore.'},
+{city:'stockholm', name:'Pet Sounds Records', hint:'Skånegatan 53', category:'shopping', notes:'Legendary indie/punk/garage shop.'},
+{city:'stockholm', name:'Bondegatan Stockholm', category:'area', notes:'SoFo triangle walking street (with Skånegatan & Nytorgsgatan).'},
+{city:'stockholm', name:'Bondegatan Erstagatan Stockholm', category:'attraction', notes:'Corner with the most photographed large murals.'},
+{city:'stockholm', name:'Snickars Records', hint:'Hökens gata 11', category:'shopping', notes:"Named one of the world's best record shops."},
+{city:'stockholm', name:'Björns Trädgård', category:'area', notes:'Community garden with street art.'},
+{city:'stockholm', name:'Hornstull Strand', category:'area', notes:'Near the Hornstull railway underpass.'},
+{city:'stockholm', name:'Sankt Eriksgatan', category:'shopping', notes:'Record-shop strip (Wasa Skivbörs, Record Hunter, The Golden Oldies Shop, Nostalgipalatset, Andra Jazz), Vasastan.'},
+{city:'stockholm', name:'Arkivet vintage store', hint:'Norrtullsgatan 33', category:'shopping', notes:'Standout vintage/secondhand shop, near Odenplan.'},
+{city:'stockholm', name:'ABBA Museum', category:'attraction', notes:'Genuinely fun and interactive.'},
+{city:'stockholm', name:'Swedish Museum of Performing Arts Scenkonstmuseet', category:'attraction', notes:'Instrument history, hands-on, kid-friendly.'},
+{city:'stockholm', name:'Debaser Strand', category:'bar', notes:'Live venue.'},
+{city:'stockholm', name:'Debaser Nova', category:'bar', notes:'Live venue.'},
+{city:'stockholm', name:'Slaktkyrkan', category:'bar', notes:'Former slaughterhouse chapel turned venue.'},
+{city:'stockholm', name:'Nalen', category:'bar', notes:'Historic ballroom, jazz/pop.'},
+{city:'stockholm', name:'Fasching jazz club Stockholm', category:'bar', notes:''},
+{city:'stockholm', name:'Konserthuset Stockholm', category:'attraction', notes:''},
+{city:'stockholm', name:'Hermans restaurant', hint:'Fjällgatan', category:'restaurant', notes:'All-you-can-eat vegetarian/vegan buffet with harbor-view terrace, Södermalm.'},
+{city:'stockholm', name:'Rosendals Trädgård', hint:'Djurgården', category:'cafe', notes:'Biodynamic garden café, own bakery.'},
+{city:'stockholm', name:'Östermalms Saluhall', category:'restaurant', notes:"The 'fancy' rebuilt food hall."},
+{city:'stockholm', name:'Hötorgshallen', category:'restaurant', notes:'Scrappier, more local/immigrant-influenced food hall, less touristy.'},
+{city:'stockholm', name:'Hornstulls Marknad', category:'area', notes:'Big weekend flea/vintage market on the water, runs through Oct 11.'},
+{city:'stockholm', name:'Spårvägsmuseet', category:'attraction', notes:'Public Transport Museum. Confirm current address — has relocated before.'},
+{city:'stockholm', name:'Spritmuseum', hint:'Djurgården', category:'attraction', notes:"Museum of Spirits, Absolut Vodka's home museum."},
+{city:'stockholm', name:'Junibacken', category:'attraction', notes:'Astrid Lindgren storybook world.'},
+{city:'stockholm', name:'Vasaparken', category:'nature', notes:'Free playground.'},
+{city:'stockholm', name:'Humlegården', category:'nature', notes:'Free playground.'},
+{city:'stockholm', name:'Tantolunden', category:'nature', notes:'Free playground.'},
+{city:'stockholm', name:'Gröna Lund', category:'attraction', notes:"Seasonal amusement park — confirm it's actually open during these dates."}
+];
+
+document.getElementById('count').textContent = PLACES.length + ' places to geocode with review.';
+
+function esc(s) { return (s || '').replace(/'/g, "''"); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b[0]-a[0]) * Math.PI/180, dLng = (b[1]-a[1]) * Math.PI/180;
+  const s = Math.sin(dLat/2)**2 + Math.cos(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+
+async function nomSearch(q, cfg, limit) {
+  const params = new URLSearchParams({ format: 'json', q, limit: String(limit), countrycodes: cfg.countrycodes, viewbox: cfg.viewbox, addressdetails: '0' });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Fetch candidates from every query form we have, merge & dedupe by rounded coords.
+async function fetchCandidates(place) {
+  const cfg = CITIES[place.city];
+  const results = [];
+  if (place.hint) {
+    const a = await nomSearch(`${place.hint}, ${cfg.suffix}`, cfg, 3);
+    a.forEach(r => results.push({ ...r, src: 'address' }));
+    await sleep(2500);
+  }
+  const b = await nomSearch((place.hint ? `${place.name}, ${place.hint}` : place.name) + `, ${cfg.suffix}`, cfg, place.hint ? 2 : 4);
+  b.forEach(r => results.push({ ...r, src: place.hint ? 'name+address' : 'name' }));
+
+  const seen = new Set();
+  const deduped = [];
+  for (const r of results) {
+    const key = Math.round(parseFloat(r.lat)*2000) + ',' + Math.round(parseFloat(r.lon)*2000);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const lat = parseFloat(r.lat), lng = parseFloat(r.lon);
+    deduped.push({ lat, lng, address: r.display_name, src: r.src, distKm: haversineKm(cfg.center, [lat, lng]) });
+  }
+  deduped.sort((x, y) => (x.src === 'address' ? 0 : 1) - (y.src === 'address' ? 0 : 1) || x.distKm - y.distKm);
+  return deduped;
+}
+
+const FAR_THRESHOLD_KM = 12; // beyond this, don't auto-select — force a conscious choice
+
+function renderCard(place, candidates, idx) {
+  const card = document.createElement('div');
+  card.className = 'card' + (candidates.length === 0 ? ' no-candidates' : '');
+  card.dataset.idx = idx;
+
+  const h = document.createElement('h3');
+  h.textContent = place.name;
+  card.appendChild(h);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${place.city} · ${place.category}` + (place.hint ? ` · hint: ${place.hint}` : '');
+  card.appendChild(meta);
+
+  if (place.notes) {
+    const n = document.createElement('div');
+    n.className = 'notes';
+    n.textContent = place.notes;
+    card.appendChild(n);
+  }
+
+  let autoSelected = false;
+  candidates.forEach((c, ci) => {
+    const label = document.createElement('label');
+    label.className = 'cand';
+    const radio = document.createElement('input');
+    radio.type = 'radio';
+    radio.name = `place-${idx}`;
+    radio.value = ci;
+    const isNear = c.distKm <= FAR_THRESHOLD_KM;
+    if (isNear && !autoSelected) { radio.checked = true; autoSelected = true; }
+    label.appendChild(radio);
+    const distSpan = document.createElement('span');
+    distSpan.className = 'dist ' + (isNear ? 'near' : 'far');
+    distSpan.textContent = (isNear ? '' : '⚠ ') + c.distKm.toFixed(1) + ' km from city center';
+    label.appendChild(distSpan);
+    label.appendChild(document.createTextNode(' — '));
+    const addrSpan = document.createElement('span');
+    addrSpan.className = 'addr';
+    addrSpan.textContent = c.address;
+    label.appendChild(addrSpan);
+    const srcSpan = document.createElement('span');
+    srcSpan.className = 'src';
+    srcSpan.textContent = ` [${c.src} match]`;
+    label.appendChild(srcSpan);
+    card.appendChild(label);
+  });
+
+  const skipLabel = document.createElement('label');
+  skipLabel.className = 'cand skip-row';
+  const skipRadio = document.createElement('input');
+  skipRadio.type = 'radio';
+  skipRadio.name = `place-${idx}`;
+  skipRadio.value = 'skip';
+  if (!autoSelected) skipRadio.checked = true;
+  skipLabel.appendChild(skipRadio);
+  skipLabel.appendChild(document.createTextNode(candidates.length === 0 ? 'No candidates found — skip, add manually via the app' : 'Skip — none of these are right, add manually via the app'));
+  card.appendChild(skipLabel);
+
+  return card;
+}
+
+document.getElementById('startBtn').onclick = async () => {
+  document.getElementById('startBtn').disabled = true;
+  const cardsById = [];
+  const cardsEl = document.getElementById('cards');
+  for (let i = 0; i < PLACES.length; i++) {
+    const p = PLACES[i];
+    document.getElementById('progress').textContent = `${i + 1} / ${PLACES.length} — ${p.name}`;
+    let candidates = [];
+    try {
+      candidates = await fetchCandidates(p);
+    } catch (e) {
+      candidates = [];
+    }
+    cardsById[i] = { place: p, candidates };
+    cardsEl.appendChild(renderCard(p, candidates, i));
+    document.getElementById('genBtn').style.display = 'inline-block';
+    await sleep(2500);
+  }
+  document.getElementById('progress').textContent = `Done fetching all ${PLACES.length}. Review selections below, then Generate SQL.`;
+  document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
+  document.getElementById('startBtn').disabled = false;
+  window._tripline_cards = cardsById;
+};
+
+document.getElementById('genBtn').onclick = () => {
+  const cardsById = window._tripline_cards || [];
+  const rows = [];
+  const skipped = [];
+  cardsById.forEach(({ place, candidates }, idx) => {
+    const checked = document.querySelector(`input[name="place-${idx}"]:checked`);
+    if (!checked || checked.value === 'skip') { skipped.push(place); return; }
+    const c = candidates[parseInt(checked.value, 10)];
+    rows.push({ ...place, lat: c.lat, lng: c.lng, address: c.address });
+  });
+
+  let sql = `-- Tripline location import — reviewed batch, generated ${new Date().toISOString()}\n`;
+  sql += `-- ${rows.length} confirmed, ${skipped.length} skipped for manual entry.\n\n`;
+  sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
+  sql += rows.map(r =>
+    `  ('${esc(r.name)}', '${esc(r.address)}', '${r.category}', ${r.lat}, ${r.lng}, ${r.notes ? `'${esc(r.notes)}'` : 'NULL'}, false, '${r.city}')`
+  ).join(',\n') + ';\n';
+
+  if (skipped.length) {
+    sql += `\n-- SKIPPED (add manually via the app):\n`;
+    skipped.forEach(p => { sql += `--   [${p.city}] ${p.name}${p.hint ? ' (' + p.hint + ')' : ''}\n`; });
+  }
+
+  document.getElementById('output').value = sql;
+  document.getElementById('summary').textContent = `${rows.length} confirmed, ${skipped.length} skipped.`;
+};
+</script>
+</body>
+</html>
