@@ -15,6 +15,7 @@
   #genBtn { position: sticky; top: 0; z-index: 10; margin-bottom: 1rem; }
   .card { border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.9rem 1rem; margin-bottom: 0.9rem; background: #fff; }
   .card.needs-trace { border-color: #C97850; background: #FBF3EE; }
+  .card.approx { border-color: #C97850; background: #FFFBF0; }
   .card.ok { border-color: #4a7c3f; }
   .card h3 { margin: 0 0 0.2rem 0; font-size: 1rem; }
   .card .meta { color: #888; font-size: 0.78rem; margin-bottom: 0.5rem; }
@@ -215,19 +216,66 @@ async function fetchStreetWay(shape, cfg) {
   return points.length ? { points, segmentLengths } : null;
 }
 
+// Two-tier fallback for when OSM has no boundary polygon (district) or mapped way
+// (street) for a name at all -- ported from index.html's findApproximatePoint(),
+// adapted to this file's plain-fetch Nominatim style (no nominatim() helper here)
+// and its CITIES shape (suffix instead of cfg.geocodeSuffix). Tries a plain
+// Nominatim point search first, then an Overpass node search by name, and returns
+// null only when neither tier finds anything -- a true dead end.
+async function findApproximatePoint(shape, cfg) {
+  try {
+    const params = new URLSearchParams({
+      format: 'json', limit: '1',
+      q: `${shape.queryName}, ${cfg.suffix}`,
+      countrycodes: cfg.countrycodes, viewbox: cfg.viewbox
+    });
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.length) {
+        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), tier: 'Nominatim point search' };
+      }
+    }
+  } catch (e) { /* fall through to the Overpass node attempt */ }
+
+  try {
+    const [lonMin, latMin, lonMax, latMax] = cfg.viewbox.split(',').map(Number);
+    const query = `[out:json][timeout:15];node["name"="${shape.queryName}"](${latMin},${lonMin},${latMax},${lonMax});out;`;
+    const res = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      body: `data=${encodeURIComponent(query)}`
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.elements && data.elements.length) {
+        const el = data.elements[0];
+        return { lat: el.lat, lng: el.lon, tier: 'Overpass node' };
+      }
+    }
+  } catch (e) { /* genuinely nothing found */ }
+
+  return null;
+}
+
 function centroidOf(points) {
   const lat = points.reduce((s, p) => s + p[0], 0) / points.length;
   const lng = points.reduce((s, p) => s + p[1], 0) / points.length;
   return [lat, lng];
 }
 
-function renderPreview(container, shape, geometry) {
+function renderPreview(container, shape, geometry, fallbackPoint) {
   const mapDiv = document.createElement('div');
   mapDiv.className = 'previewMap';
   container.appendChild(mapDiv);
   // Deferred init so the div has layout dimensions before Leaflet measures it.
   setTimeout(() => {
     const map = L.map(mapDiv, { zoomControl: false, attributionControl: false });
+    if (fallbackPoint) {
+      const marker = L.marker([fallbackPoint.lat, fallbackPoint.lng]);
+      marker.addTo(map);
+      map.setView([fallbackPoint.lat, fallbackPoint.lng], 15);
+      return;
+    }
     const layer = shape.type === 'street'
       ? L.polyline(geometry, { color: '#E8B84E', weight: 5 })
       : L.polygon(geometry, { color: '#A8C5DD', weight: 2, fillOpacity: 0.25 });
@@ -236,9 +284,9 @@ function renderPreview(container, shape, geometry) {
   }, 0);
 }
 
-function renderCard(shape, geometry, idx, resolved) {
+function renderCard(shape, geometry, idx, resolved, fallbackPoint) {
   const card = document.createElement('div');
-  card.className = 'card' + (geometry ? ' ok' : ' needs-trace');
+  card.className = 'card' + (geometry ? ' ok' : (fallbackPoint ? ' approx' : ' needs-trace'));
   card.dataset.idx = idx;
 
   const h = document.createElement('h3');
@@ -279,20 +327,43 @@ function renderCard(shape, geometry, idx, resolved) {
     }
 
     renderPreview(card, shape, geometry);
+  } else if (fallbackPoint) {
+    status.className = 'status warn';
+    const cr = fallbackPoint.cityResolved;
+    const cityText = (cr && cr.confident) ? cr.winner : "unresolved, pick manually";
+    status.textContent = `⚠ No OSM boundary/way found — using an approximate point (found via ${fallbackPoint.tier}), city: ${cityText}`;
+    card.appendChild(status);
+
+    if (cr && !cr.confident) {
+      const warn = document.createElement('div');
+      warn.className = 'status warn';
+      warn.textContent = cr.winner
+        ? `⚠ low-confidence city match for this point — closest is "${cr.winner}", but not confidently in its viewbox — review the city field before pasting`
+        : `⚠ this point doesn't fall in any known city's viewbox — fill in the city field by hand`;
+      card.appendChild(warn);
+    } else if (cr && cr.winner !== shape.city) {
+      const warn = document.createElement('div');
+      warn.className = 'status warn';
+      warn.textContent = `⚠ point suggests "${cr.winner}", not "${shape.city}" — review before accepting`;
+      card.appendChild(warn);
+    }
+
+    renderPreview(card, shape, null, fallbackPoint);
   } else {
     status.className = 'status warn';
     status.textContent = '⚠ No OSM geometry found — needs manual trace (see plan §10)';
     card.appendChild(status);
   }
 
+  const usable = !!(geometry || fallbackPoint);
   const label = document.createElement('label');
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
-  checkbox.checked = !!geometry;
-  checkbox.disabled = !geometry;
+  checkbox.checked = usable;
+  checkbox.disabled = !usable;
   checkbox.id = `accept-${idx}`;
   label.appendChild(checkbox);
-  label.appendChild(document.createTextNode(geometry ? ' Include this shape in the generated code' : ' Not available automatically -- trace by hand instead'));
+  label.appendChild(document.createTextNode(usable ? ' Include this shape in the generated code' : ' Not available automatically -- trace by hand instead'));
   card.appendChild(label);
 
   return card;
@@ -302,7 +373,7 @@ document.getElementById('startBtn').onclick = async () => {
   document.getElementById('startBtn').disabled = true;
   const results = [];
   const cardsEl = document.getElementById('cards');
-  let okCount = 0, missCount = 0;
+  let okCount = 0, approxCount = 0, missCount = 0;
 
   for (let i = 0; i < SHAPES.length; i++) {
     const shape = SHAPES[i];
@@ -330,15 +401,25 @@ document.getElementById('startBtn').onclick = async () => {
       geometry = resolved.cleanedGeometry;
     }
 
-    if (geometry) okCount++; else missCount++;
-    results[i] = { shape, geometry, resolved };
-    cardsEl.appendChild(renderCard(shape, geometry, i, resolved));
+    let fallbackPoint = null;
+    if (!geometry) {
+      let point = null;
+      try { point = await findApproximatePoint(shape, cfg); } catch (e) { point = null; }
+      if (point) {
+        const cityResolved = resolveShapeCity([[point.lat, point.lng]], null);
+        fallbackPoint = { lat: point.lat, lng: point.lng, tier: point.tier, cityResolved };
+      }
+    }
+
+    if (geometry) okCount++; else if (fallbackPoint) approxCount++; else missCount++;
+    results[i] = { shape, geometry, resolved, fallbackPoint };
+    cardsEl.appendChild(renderCard(shape, geometry, i, resolved, fallbackPoint));
     document.getElementById('genBtn').style.display = 'inline-block';
     await sleep(1500);
   }
 
   document.getElementById('progress').textContent =
-    `Done. ${okCount} fetched automatically, ${missCount} need manual tracing.`;
+    `Done. ${okCount} fetched automatically, ${approxCount} approximate points, ${missCount} need manual tracing.`;
   document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
   document.getElementById('startBtn').disabled = false;
   window._triplet_shapes = results;
@@ -348,18 +429,21 @@ document.getElementById('startBtn').onclick = async () => {
 function generateCode() {
   const results = window._triplet_shapes || [];
   const accepted = [];
+  const acceptedApprox = [];
   const skipped = [];
 
-  results.forEach(({ shape, geometry }, idx) => {
+  results.forEach(({ shape, geometry, fallbackPoint }, idx) => {
     const checkbox = document.getElementById(`accept-${idx}`);
     if (checkbox && checkbox.checked && geometry) {
       accepted.push({ shape, geometry });
+    } else if (checkbox && checkbox.checked && fallbackPoint) {
+      acceptedApprox.push({ shape, fallbackPoint });
     } else {
       skipped.push(shape);
     }
   });
 
-  let out = `// Generated ${new Date().toISOString()} -- ${accepted.length} fetched automatically from OSM, ${skipped.length} need manual tracing.\n`;
+  let out = `// Generated ${new Date().toISOString()} -- ${accepted.length} fetched automatically from OSM, ${acceptedApprox.length} approximate points, ${skipped.length} need manual tracing.\n`;
   out += `// Colors below are placeholders -- adjust to taste. minZoom omitted -- defaults to cityConfig(city).zoom + 3 (see plan §4).\n`;
   out += `const NEIGHBORHOODS = {\n`;
   out += accepted.map(({ shape, geometry }) => {
@@ -375,13 +459,38 @@ function generateCode() {
   }).join(',\n') + '\n';
   out += `};\n`;
 
+  if (acceptedApprox.length) {
+    out += `\n// LOCATIONS_APPROX -- these have no real OSM boundary/way and are approximate points instead\n`;
+    out += `// (found via a Nominatim point-search or Overpass node fallback). Insert into the LOCATIONS\n`;
+    out += `// table, not neighborhood_shapes -- category is the shape's type ('district'/'street'), which\n`;
+    out += `// are already valid pin categories sharing CATEGORY_COLORS with real point categories.\n`;
+    out += `// Double-check the city field by hand for any entry flagged low-confidence/unresolved above.\n`;
+    out += `const LOCATIONS_APPROX = [\n`;
+    out += acceptedApprox.map(({ shape, fallbackPoint }) => {
+      const cr = fallbackPoint.cityResolved;
+      const cityField = (cr && cr.confident) ? cr.winner : shape.city;
+      return `  {\n` +
+             `    name: '${esc(shape.label)} (approx.)',\n` +
+             `    address: null,\n` +
+             `    category: '${shape.type}',\n` +
+             `    city: '${cityField}',\n` +
+             `    lat: ${fallbackPoint.lat.toFixed(6)},\n` +
+             `    lng: ${fallbackPoint.lng.toFixed(6)},\n` +
+             `    notes: 'Approx. location via ${fallbackPoint.tier} fallback -- not a real boundary; verify city before using.',\n` +
+             `    visited: false\n` +
+             `  }`;
+    }).join(',\n') + '\n';
+    out += `];\n`;
+  }
+
   if (skipped.length) {
-    out += `\n// NEEDS MANUAL TRACING (no OSM geometry found -- see plan §10 for the geojson.io workflow):\n`;
+    out += `\n// NEEDS MANUAL TRACING (no OSM geometry or approximate point found -- see plan §10 for the geojson.io workflow):\n`;
     skipped.forEach(s => { out += `//   [${s.city}] ${s.label} (${s.type}, id: ${s.id})\n`; });
   }
 
   document.getElementById('output').value = out;
-  document.getElementById('summary').textContent = `${accepted.length} ready to paste, ${skipped.length} need manual tracing.`;
+  document.getElementById('summary').textContent =
+    `${accepted.length} ready to paste, ${acceptedApprox.length} approximate points, ${skipped.length} need manual tracing.`;
 }
 
 document.getElementById('genBtn').onclick = generateCode;
@@ -431,13 +540,23 @@ document.getElementById('adhocFetchBtn').onclick = async () => {
     geometry = resolved.cleanedGeometry;
   }
 
+  let fallbackPoint = null;
+  if (!geometry) {
+    let point = null;
+    try { point = await findApproximatePoint(shape, cfg); } catch (e) { point = null; }
+    if (point) {
+      const cityResolved = resolveShapeCity([[point.lat, point.lng]], null);
+      fallbackPoint = { lat: point.lat, lng: point.lng, tier: point.tier, cityResolved };
+    }
+  }
+
   btn.disabled = false;
   btn.textContent = 'Fetch this shape';
 
   window._triplet_shapes = window._triplet_shapes || [];
   const idx = window._triplet_shapes.length;
-  window._triplet_shapes.push({ shape, geometry, resolved });
-  document.getElementById('cards').appendChild(renderCard(shape, geometry, idx, resolved));
+  window._triplet_shapes.push({ shape, geometry, resolved, fallbackPoint });
+  document.getElementById('cards').appendChild(renderCard(shape, geometry, idx, resolved, fallbackPoint));
   document.getElementById('genBtn').style.display = 'inline-block';
   generateCode();
 

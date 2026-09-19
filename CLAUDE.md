@@ -48,6 +48,20 @@ temporary simplification.**
   Supabase write path, so it surfaces disagreement as a warning on the
   shape's review card instead of a dialog — the human still accepts/rejects
   via the existing checkbox.
+- When OSM has no polygon/way at all for a district/street, `handleAddShapeSubmit()`
+  falls back through `findApproximatePoint()`: a plain Nominatim point search,
+  then an Overpass node search scoped to the city bbox. If either finds a
+  point, it's saved as a `locations` row (not `neighborhood_shapes`) — category
+  set to the shape's `type` (`district`/`street` are already valid pin
+  categories, sharing `CATEGORY_COLORS` with real point categories, so no
+  filter-chip changes were needed), label suffixed `" (approx.)"`, notes
+  recording which tier resolved it. City resolution reuses
+  `resolveShapeCity([[point.lat, point.lng]], null)` — a single-point
+  geometry degenerates correctly through the same majority-vote/confidence
+  logic used for real shapes, `shapeCityConfirm` included. Only a true
+  double-miss (no boundary/way AND no point AND no node) still fails with an
+  alert. No automatic re-upgrade if OSM later gains a real boundary for one
+  of these — that'd be a separate re-check, not implemented.
 - `cities` table: runtime-extensible city registry, merged into the static
   `CITIES` bootstrap object in `index.html` (never replacing it — that
   object is the offline-safe seed before any fetch resolves).
@@ -101,9 +115,13 @@ go stale, and don't leave it silently out of date either.
 
 **Data cleanup (neighborhood shapes):**
 - `copenhagen-nyboder` (Nyboder) and `stockholm-gamla-stan` (Gamla Stan)
-  have no auto-fetched geometry at all — the new classification logic can't
-  help here (nothing to classify); still need manual tracing via
-  geojson.io.
+  should now resolve automatically as approximate pins via
+  `findApproximatePoint()`'s fallback chain (see Architecture above) next
+  time they're added through the live form or the bulk tool — not yet
+  verified against the real Nominatim/Overpass response, same environment
+  constraint as everything else needing live OSM access. If both fallback
+  tiers genuinely come up empty for either, manual tracing via geojson.io is
+  still the last resort.
 
 **Known minor bugs:** none currently tracked. (Previously: `showError()`/
 `hideError()` banner masking, and `slugifyCityId()` not decomposing Nordic

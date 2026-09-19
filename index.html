@@ -1246,6 +1246,44 @@
       }
     }
 
+    // Fallback when OSM has no polygon/way for a district/street: land an
+    // approximate pin instead of forcing a trip to
+    // tools/neighborhood-shapes.html for manual tracing. Two escalating
+    // attempts -- a plain point search (many named neighborhoods have a
+    // node even with no boundary relation), then an Overpass node search
+    // scoped to the city bbox (catches an entrance/landmark node under a
+    // different tag shape than a plain search surfaces). Returns
+    // {lat, lng, tier} or null if OSM genuinely has nothing at all.
+    // Re-upgrading to a real boundary later, if OSM ever gains one, is a
+    // separate concern -- not attempted here.
+    async function findApproximatePoint(name, cfg) {
+      try {
+        const data = await nominatim(name, cfg, { limit: 1, timeout: 8000 });
+        if (data && data.length) {
+          return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), tier: 'point search' };
+        }
+      } catch (err) { /* fall through to the Overpass node attempt */ }
+
+      try {
+        const [lonMin, latMin, lonMax, latMax] = cfg.viewbox.split(',').map(Number);
+        const query = `[out:json][timeout:15];node["name"="${name}"](${latMin},${lonMin},${latMax},${lonMax});out;`;
+        const response = await fetch('https://overpass-api.de/api/interpreter', {
+          method: 'POST',
+          body: `data=${encodeURIComponent(query)}`,
+          signal: AbortSignal.timeout(15000)
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.elements && data.elements.length) {
+            const el = data.elements[0];
+            return { lat: el.lat, lng: el.lon, tier: 'Overpass node' };
+          }
+        }
+      } catch (err) { /* genuinely nothing found */ }
+
+      return null;
+    }
+
     async function geocode(address) {
       try {
         const data = await nominatim(address, currentSearchCityConfig(), { limit: 1, addressdetails: true });
@@ -2678,9 +2716,37 @@
         : await nominatimPolygon(name, cfg);
 
       if (!fetched) {
-        alert(`Could not find "${name}" on OpenStreetMap as a ${type}. Try a more specific or differently-spelled name, or trace it by hand with tools/neighborhood-shapes.html.`);
+        const point = await findApproximatePoint(name, cfg);
+        if (!point) {
+          alert(`Could not find "${name}" on OpenStreetMap at all -- no boundary/way, no point, no node. Try a more specific or differently-spelled name.`);
+          document.getElementById('submitBtn').textContent = 'Add Location';
+          document.getElementById('submitBtn').disabled = false;
+          return;
+        }
+
+        const pointResolved = resolveShapeCity([[point.lat, point.lng]], null);
+        const savePin = async (city) => {
+          const tag = `Approximate placement -- OSM has no boundary/way for this ${type}; resolved via ${point.tier}.`;
+          await addLocation({
+            name: `${name} (approx.)`,
+            address: null,
+            category: type,
+            city,
+            lat: point.lat,
+            lng: point.lng,
+            notes: notes ? `${notes}\n\n${tag}` : tag,
+            visited: false
+          });
+          closeAddForm();
+        };
+
+        if (pointResolved.confident) {
+          await savePin(pointResolved.winner);
+          return;
+        }
         document.getElementById('submitBtn').textContent = 'Add Location';
         document.getElementById('submitBtn').disabled = false;
+        showShapeCityConfirm(pointResolved, savePin);
         return;
       }
 
