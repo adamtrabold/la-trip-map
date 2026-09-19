@@ -386,8 +386,13 @@ function generateCode() {
 
 document.getElementById('genBtn').onclick = generateCode;
 
+// Kept in sync with index.html's slugifyCityId() -- see its comment for why
+// the explicit Nordic-letter mapping runs before the generic NFD strip.
 function slugify(s) {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return s
+    .replace(/[øØ]/g, 'o').replace(/[æÆ]/g, 'ae').replace(/[åÅ]/g, 'a')
+    .replace(/[þÞ]/g, 'th').replace(/[ðÐ]/g, 'd')
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 

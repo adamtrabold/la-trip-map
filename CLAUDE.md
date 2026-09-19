@@ -60,11 +60,19 @@ temporary simplification.**
 
 ## Environment constraints
 
-- An agent's sandbox typically **cannot reach Supabase, Nominatim, or
-  Overpass directly** (network egress blocked). DB migrations must be
-  handed to the user to run manually in the Supabase SQL editor; anything
-  depending on live Nominatim/Overpass calls (e.g. `tools/*.html`) must run
-  in the user's own browser, not be fetched by the agent.
+- The sandbox's own HTTPS egress is policy-blocked for Supabase, Nominatim,
+  and Overpass alike (confirmed: a direct `curl` to either gets a 403 from
+  the proxy gateway, not a DNS/routing failure) — but as of 2026-09-19, a
+  **Supabase MCP connector** is connected for this project (Trip Map,
+  `jgvckilmltimabfdvaly`), which reaches Supabase through Anthropic's
+  connector infra instead of the sandbox's own egress. Use its
+  `apply_migration`/`execute_sql`/`list_tables` etc. tools directly instead
+  of handing SQL to the user to paste into the SQL editor. No equivalent
+  connector exists for Nominatim/Overpass (checked the registry — nothing
+  fits; the closest, TomTom Maps, is a different provider and not worth
+  swapping to) or for a browser, so anything depending on a live
+  Nominatim/Overpass call (`tools/*.html`, and smoke-testing any add-form
+  change that fetches OSM data) still has to run in the user's own browser.
 - The user often works from a phone — don't hand them a file they can't
   open. Prefer pasting copy-pasteable text directly in chat, or an Artifact
   with a copy button, over `SendUserFile` for anything they need to paste
@@ -97,12 +105,12 @@ go stale, and don't leave it silently out of date either.
   help here (nothing to classify); still need manual tracing via
   geojson.io.
 
-**Known minor bugs (not fixed, flagged not silently dropped):**
-- `showError()`/`hideError()` share one global banner with no source
-  tracking, so an unrelated successful fetch's `hideError()` can mask a
-  real error before the user reads it.
-- `slugifyCityId()` doesn't decompose Nordic `ø`/`Ø` (e.g. "Nørrebro" →
-  "n-rrebro") — cosmetic only, still produces a valid unique slug.
+**Known minor bugs:** none currently tracked. (Previously: `showError()`/
+`hideError()` banner masking, and `slugifyCityId()` not decomposing Nordic
+`ø`/`æ`/`å`/`þ`/`ð` — both fixed 2026-09-19. `showError`/`hideError` now
+take a `source` tag and only a matching source's `hideError()` clears the
+banner; `slugifyCityId()` (and the bulk tool's mirrored `slugify()`)
+explicitly map those five letters before the generic NFD strip.)
 
 **Deferred roadmap (not started):**
 - Phase 2 — trip context (dates/closures) and shared traits (kid-friendly,

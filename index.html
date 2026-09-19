@@ -1033,9 +1033,9 @@
           lastPayloadDigest = digest;
           updateUI();
         }
-        hideError();
+        hideError('locations');
       } catch (err) {
-        showError(`Failed to load: ${err.message}`);
+        showError(`Failed to load: ${err.message}`, 'locations');
       }
     }
 
@@ -1064,8 +1064,9 @@
         if (error) throw error;
         neighborhoodShapes = data || [];
         updateUI();   // refreshes the list count/cards too, not just the map layers
+        hideError('shapes');
       } catch (err) {
-        showError(`Failed to load neighborhood shapes: ${err.message}`);
+        showError(`Failed to load neighborhood shapes: ${err.message}`, 'shapes');
       }
     }
 
@@ -1091,8 +1092,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
       }
     }
 
@@ -1106,8 +1108,9 @@
 
         if (error) throw error;
         await fetchNeighborhoodShapes();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
       }
     }
 
@@ -1122,8 +1125,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'delete'));
+        showError(handleRLSError(err, 'delete'), 'mutation');
       }
     }
 
@@ -1138,8 +1142,9 @@
 
         if (error) throw error;
         await fetchNeighborhoodShapes();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'delete'));
+        showError(handleRLSError(err, 'delete'), 'mutation');
       }
     }
 
@@ -1154,8 +1159,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'update'));
+        showError(handleRLSError(err, 'update'), 'mutation');
       }
     }
     
@@ -1643,8 +1649,16 @@
       };
     }
 
+    // NFD-decomposing alone doesn't touch Nordic letters that have no
+    // canonical base+diacritic decomposition (ø, æ, å, þ, ð aren't
+    // "o with a combining mark" in Unicode, they're their own codepoints)
+    // -- e.g. "Nørrebro" NFD-stripped to "n-rrebro" instead of "norrebro".
+    // Map those explicitly before the generic strip.
     function slugifyCityId(label) {
-      return label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      return label
+        .replace(/[øØ]/g, 'o').replace(/[æÆ]/g, 'ae').replace(/[åÅ]/g, 'a')
+        .replace(/[þÞ]/g, 'th').replace(/[ðÐ]/g, 'd')
+        .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
         .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     }
 
@@ -1723,9 +1737,10 @@
         }]);
         if (error) throw error;
         mergeCityIntoRuntime(cfg);
+        hideError('mutation');
         return true;
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
         return false;
       }
     }
@@ -1750,8 +1765,9 @@
         populateCityInput();
         createCitySelector();
         updateCitySelectorUI();
+        hideError('cities');
       } catch (err) {
-        showError(`Failed to load cities: ${err.message}`);
+        showError(`Failed to load cities: ${err.message}`, 'cities');
       }
     }
 
@@ -1862,7 +1878,7 @@
       const btn = document.getElementById('centerMeBtn');
       
       if (!navigator.geolocation) {
-        showError('Geolocation is not supported by your browser');
+        showError('Geolocation is not supported by your browser', 'geolocation');
         return;
       }
       
@@ -1892,7 +1908,7 @@
           focusMap([latitude, longitude], 14, { animate: true });
 
           btn.classList.remove('loading');
-          hideError();
+          hideError('geolocation');
         },
         (error) => {
           btn.classList.remove('loading');
@@ -1910,7 +1926,7 @@
               break;
           }
           
-          showError(errorMsg);
+          showError(errorMsg, 'geolocation');
         },
         {
           enableHighAccuracy: true,
@@ -1920,12 +1936,24 @@
       );
     }
     
-    function showError(msg) {
+    // The banner is a single shared DOM element, but errors come from
+    // unrelated sources (the locations poll, the shapes fetch, a mutation,
+    // geolocation) -- without tracking which one is currently showing, any
+    // OTHER source's success would call hideError() and mask a real error
+    // before it's read. hideError(source) only clears when it matches
+    // whoever's currently showing; the newest showError() always wins the
+    // single banner slot outright, since only one message fits at a time.
+    let currentErrorSource = null;
+
+    function showError(msg, source) {
+      currentErrorSource = source;
       document.getElementById('errorText').textContent = msg;
       document.getElementById('error').classList.add('show');
     }
-    
-    function hideError() {
+
+    function hideError(source) {
+      if (source !== currentErrorSource) return;
+      currentErrorSource = null;
       document.getElementById('error').classList.remove('show');
     }
 
