@@ -29,6 +29,25 @@ temporary simplification.**
   `city`, `type` (`district`|`street`), `geometry` (array of `[lat,lng]`
   pairs, this app's convention, not GeoJSON). Fetched live from OSM
   (Nominatim polygon / Overpass way) at add time, not hand-authored.
+- A shape's `city` is never trusted from the pre-fetch form selection — it's
+  resolved from the fetched geometry itself by `resolveShapeCity()`
+  (`index.html`), which classifies every point against `CITIES` and
+  majority-votes a winner. For streets (which arrive as multiple merged OSM
+  way segments), a whole segment that disagrees with the winner gets
+  dropped rather than diluting the vote — this is what catches a spurious
+  OSM merge (a same-named way in a different city) automatically instead of
+  requiring a human to eyeball a preview map. When no existing city gets a
+  confident majority (`SHAPE_CITY_CONFIDENT_SHARE`, currently 60%),
+  `handleAddShapeSubmit()` shows the `shapeCityConfirm` dialog: create a new
+  city (reusing the pin flow's `deriveNewCityConfig()`/`addCity()`, via a
+  fresh `nominatimReverse()` lookup on the shape's centroid since a shape
+  fetch has no `addressDetails` of its own) or assign to the runner-up
+  existing city anyway. The bulk/offline tool
+  (`tools/neighborhood-shapes.html`) has its own port of the same
+  classification logic (no build step ⇒ duplicated, not shared) but no
+  Supabase write path, so it surfaces disagreement as a warning on the
+  shape's review card instead of a dialog — the human still accepts/rejects
+  via the existing checkbox.
 - `cities` table: runtime-extensible city registry, merged into the static
   `CITIES` bootstrap object in `index.html` (never replacing it — that
   object is the offline-safe seed before any fetch resolves).
@@ -57,20 +76,26 @@ Update this list as items get resolved or new ones surface — don't let it
 go stale, and don't leave it silently out of date either.
 
 **Needs the user's action:**
-- Confirm the `20260920000000_add_cities_table.sql` migration has actually
-  been run. Until it is, `fetchCities()` throws on every load (the `cities`
-  table doesn't exist yet), Phase 4 auto-detection silently no-ops back to
-  the static `CITIES` bootstrap, and the error banner flashes on load
-  (masked a moment later by an unrelated successful fetch calling
-  `hideError()` — see the bug noted below).
+- ~~Confirm the `cities` table migration has been run~~ — confirmed done
+  (2026-09-19).
+- Smoke-test the new shape-city resolution in a real browser (agent
+  sandboxes here can't reach Nominatim/Overpass): add a district/street
+  that should confidently match an existing city, one that should trip the
+  `shapeCityConfirm` dialog, and try both its "Add city" and "Add to
+  [city]" buttons.
+- Re-run `tools/neighborhood-shapes.html` for `reykjavik-klapparstigur` in
+  your own browser. The tool now auto-drops OSM segments that disagree with
+  the majority-voted city (see Architecture above), which should exclude
+  the ~50km Keflavík fragment without needing to eyeball the preview map —
+  but this hasn't been verified against the real Overpass response, since
+  the agent that wrote it can't reach Overpass either. Check the card's
+  warning text before accepting.
 
 **Data cleanup (neighborhood shapes):**
-- `reykjavik-klapparstigur` was excluded from the seeded shapes — 14 of 43
-  fetched geometry points jumped ~50km south to Keflavík (Overpass merged
-  in an unrelated way sharing the street name). Needs a re-fetch or manual
-  fix before it's added.
 - `copenhagen-nyboder` (Nyboder) and `stockholm-gamla-stan` (Gamla Stan)
-  have no auto-fetched geometry — need manual tracing via geojson.io.
+  have no auto-fetched geometry at all — the new classification logic can't
+  help here (nothing to classify); still need manual tracing via
+  geojson.io.
 
 **Known minor bugs (not fixed, flagged not silently dropped):**
 - `showError()`/`hideError()` share one global banner with no source
