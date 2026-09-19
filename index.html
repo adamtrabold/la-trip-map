@@ -244,76 +244,8 @@
       margin-bottom: 0.3rem;
     }
 
-    /* Pin/shape mode switch -- a real segmented control, not a checkbox
-       with a sentence next to it. #isShapeInput stays a plain checkbox
-       (the script reads .checked and dispatches 'change' on it); it's
-       just stretched invisibly over the whole control so a tap anywhere
-       on the pill toggles it natively. */
-    #isShapeLabel {
-      display: block;
-      position: relative;
-      margin-bottom: 1.25rem;
-      padding-bottom: 1.1rem;
-      border-bottom: 1px solid #E8E6DD;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    #addForm #isShapeInput {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      opacity: 0;
-      cursor: pointer;
-      z-index: 2;
-    }
-
-    .mode-toggle-track {
-      position: relative;
-      display: flex;
-      background: #F5F4EF;
-      border: 1px solid #E8E6DD;
-      border-radius: 999px;
-      padding: 4px;
-      height: 44px;
-    }
-
-    .mode-toggle-thumb {
-      position: absolute;
-      top: 4px;
-      left: 4px;
-      width: calc(50% - 4px);
-      height: calc(100% - 8px);
-      background: #A8C5DD;
-      border-radius: 999px;
-      transition: transform 0.2s ease;
-    }
-
-    #isShapeInput:checked ~ .mode-toggle-track .mode-toggle-thumb {
-      transform: translateX(100%);
-    }
-
-    .mode-toggle-text {
-      position: relative;
-      z-index: 1;
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #6B6A5F;
-      transition: color 0.2s ease;
-    }
-
-    #isShapeInput:not(:checked) ~ .mode-toggle-track .mode-toggle-text--pin,
-    #isShapeInput:checked ~ .mode-toggle-track .mode-toggle-text--shape {
-      color: white;
-    }
-
+    /* Shown under categoryInput only when a shape category (district/street)
+       is selected -- see isShapeCategory() in the script. */
     .mode-toggle-hint {
       display: block;
       font-size: 0.75rem;
@@ -811,20 +743,6 @@
           <select id="cityInput"></select>
         </div>
 
-        <label id="isShapeLabel">
-          <input type="checkbox" id="isShapeInput">
-          <span class="mode-toggle-track" aria-hidden="true">
-            <span class="mode-toggle-thumb"></span>
-            <span class="mode-toggle-text mode-toggle-text--pin">Location</span>
-            <span class="mode-toggle-text mode-toggle-text--shape">Area</span>
-          </span>
-          <span class="mode-toggle-hint">Area mode traces a neighborhood or street from OpenStreetMap instead of adding a single location.</span>
-        </label>
-
-        <select id="shapeTypeInput" style="display:none;">
-          <option value="district">District (area to wander)</option>
-          <option value="street">Street (path to walk)</option>
-        </select>
         <div id="addressInputWrapper">
           <input type="text" id="nameInput" placeholder="Search for a place..." required autocomplete="off">
           <div id="addressAutocomplete"></div>
@@ -840,7 +758,10 @@
           <option value="area">Area</option>
           <option value="hotel">Hotel</option>
           <option value="other">Other</option>
+          <option value="district">District (neighborhood shape)</option>
+          <option value="street">Street (walking path shape)</option>
         </select>
+        <p id="shapeHint" class="mode-toggle-hint" style="display:none;">Traces this from OpenStreetMap as a map shape instead of a single pin — no address needed.</p>
         <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
         <button id="submitBtn">Add Location</button>
       </div>
@@ -902,7 +823,9 @@
       shopping: '#A889B8',
       area: '#A8C5DD',
       hotel: '#D4A574',
-      other: '#A8B89E'
+      other: '#A8B89E',
+      district: '#6FA8A6',
+      street: '#C97850'
     };
     
     // `countrycodes` is Nominatim's HARD filter -- results outside these countries
@@ -1759,6 +1682,7 @@
     function visibleNeighborhoodShapes() {
       const zoom = map.getZoom();
       return neighborhoodShapes.filter(nb => {
+        if (!filters.categories[nb.type]) return false;   // same category filter chips as pins
         if (!isAllCities() && nb.city !== activeCity) return false;
         return zoom >= neighborhoodMinZoom(nb);
       });
@@ -2089,14 +2013,19 @@
       hideAutocomplete();
     });
 
-    // Toggling shape mode swaps what the form asks for: a shape needs a name
-    // and a type to search OSM with, not a street address or category.
-    document.getElementById('isShapeInput').addEventListener('change', (e) => {
-      const isShape = e.target.checked;
-      document.getElementById('shapeTypeInput').style.display = isShape ? '' : 'none';
+    // A category IS the mode: 'district'/'street' mean "fetch an OSM shape,"
+    // every other category means "a normal pin." One dropdown drives both
+    // what fields are shown AND which table the submit goes to (see
+    // isShapeCategory() / submitBtn.onclick below) -- no separate toggle.
+    function isShapeCategory(category) {
+      return category === 'district' || category === 'street';
+    }
+
+    document.getElementById('categoryInput').addEventListener('change', (e) => {
+      const isShape = isShapeCategory(e.target.value);
       document.getElementById('addressInput').style.display = isShape ? 'none' : '';
       document.getElementById('addressInput').required = !isShape;
-      document.getElementById('categoryInput').style.display = isShape ? 'none' : '';
+      document.getElementById('shapeHint').style.display = isShape ? '' : 'none';
       document.getElementById('nameInput').placeholder = isShape
         ? 'Neighborhood/street name to search OSM for (e.g. Nørrebro)'
         : 'Search for a place...';
@@ -2108,8 +2037,8 @@
       document.getElementById('nameInput').value = '';
       document.getElementById('addressInput').value = '';
       document.getElementById('notesInput').value = '';
-      document.getElementById('isShapeInput').checked = false;
-      document.getElementById('isShapeInput').dispatchEvent(new Event('change'));
+      document.getElementById('categoryInput').value = 'restaurant';
+      document.getElementById('categoryInput').dispatchEvent(new Event('change'));
       document.getElementById('controls').classList.remove('show');
       document.getElementById('addForm').classList.remove('show');
       document.getElementById('floatingAddBtn').classList.remove('active');
@@ -2124,7 +2053,7 @@
     // authoring and produces code to paste in by hand).
     async function handleAddShapeSubmit() {
       const name = document.getElementById('nameInput').value.trim();
-      const type = document.getElementById('shapeTypeInput').value;
+      const type = document.getElementById('categoryInput').value;   // 'district' | 'street'
       const notes = document.getElementById('notesInput').value.trim();
       const city = formCityId();
 
@@ -2153,7 +2082,7 @@
         city,
         type,
         label: name,
-        color: type === 'street' ? '#E8B84E' : '#A8C5DD',
+        color: CATEGORY_COLORS[type],
         note: notes || null,
         geometry
       });
@@ -2205,7 +2134,7 @@
     }
 
     document.getElementById('submitBtn').onclick = () => {
-      return document.getElementById('isShapeInput').checked
+      return isShapeCategory(document.getElementById('categoryInput').value)
         ? handleAddShapeSubmit()
         : handleAddLocationSubmit();
     };
