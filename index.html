@@ -244,6 +244,52 @@
       margin-bottom: 0.3rem;
     }
 
+    /* City + Category are collapsed by default -- both already have sensible
+       defaults (defaultFormCity(), 'restaurant'), so the common quick-add
+       case never needs to open this. The summary line stays informative
+       (kept in sync by updateCityCategorySummary() in the script) so a
+       collapsed group is never a mystery. */
+    #addForm .collapsible-group {
+      border: 1px solid #E8E6DD;
+      border-radius: 0.5rem;
+      padding: 0 0.9rem;
+      margin-bottom: 0.9rem;
+      background: #FBFAF7;
+    }
+
+    #addForm .collapsible-group[open] {
+      padding-bottom: 0.9rem;
+    }
+
+    #addForm .collapsible-group summary {
+      padding: 0.7rem 0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #6B6A5F;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      list-style: none;
+    }
+
+    #addForm .collapsible-group summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #addForm .collapsible-group summary::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: 0.5rem;
+      transition: transform 0.15s ease;
+    }
+
+    #addForm .collapsible-group[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    #addForm .collapsible-group .field-group:last-of-type {
+      margin-bottom: 0;
+    }
+
     /* Shown under categoryInput only when a shape category (district/street)
        is selected -- see isShapeCategory() in the script. */
     .mode-toggle-hint {
@@ -738,30 +784,36 @@
   <div id="mainContent">
     <div id="controls">
       <div id="addForm">
-        <div class="field-group">
-          <label class="field-label" for="cityInput">City</label>
-          <select id="cityInput"></select>
-        </div>
+        <details id="cityCategoryDetails" class="collapsible-group">
+          <summary id="cityCategorySummary">City &amp; Category</summary>
+          <div class="field-group">
+            <label class="field-label" for="cityInput">City</label>
+            <select id="cityInput"></select>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="categoryInput">Category</label>
+            <select id="categoryInput">
+              <option value="restaurant">Restaurant</option>
+              <option value="cafe">Cafe</option>
+              <option value="bar">Bar</option>
+              <option value="attraction">Attraction</option>
+              <option value="nature">Nature</option>
+              <option value="shopping">Shopping</option>
+              <option value="area">Area</option>
+              <option value="hotel">Hotel</option>
+              <option value="other">Other</option>
+              <option value="district">District (neighborhood shape)</option>
+              <option value="street">Street (walking path shape)</option>
+            </select>
+          </div>
+          <p id="shapeHint" class="mode-toggle-hint" style="display:none;">Traces this from OpenStreetMap as a map shape instead of a single pin — no address needed.</p>
+        </details>
 
         <div id="addressInputWrapper">
           <input type="text" id="nameInput" placeholder="Search for a place..." required autocomplete="off">
           <div id="addressAutocomplete"></div>
         </div>
         <input type="text" id="addressInput" placeholder="Address" required>
-        <select id="categoryInput">
-          <option value="restaurant">Restaurant</option>
-          <option value="cafe">Cafe</option>
-          <option value="bar">Bar</option>
-          <option value="attraction">Attraction</option>
-          <option value="nature">Nature</option>
-          <option value="shopping">Shopping</option>
-          <option value="area">Area</option>
-          <option value="hotel">Hotel</option>
-          <option value="other">Other</option>
-          <option value="district">District (neighborhood shape)</option>
-          <option value="street">Street (walking path shape)</option>
-        </select>
-        <p id="shapeHint" class="mode-toggle-hint" style="display:none;">Traces this from OpenStreetMap as a map shape instead of a single pin — no address needed.</p>
         <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
         <button id="submitBtn">Add Location</button>
       </div>
@@ -1450,6 +1502,18 @@
 
     function syncAddFormCity() {
       document.getElementById('cityInput').value = defaultFormCity();
+      updateCityCategorySummary();
+    }
+
+    // Keeps the collapsed <details> summary informative so collapsing City
+    // & Category never hides what's actually selected.
+    function updateCityCategorySummary() {
+      const cityInput = document.getElementById('cityInput');
+      const categoryInput = document.getElementById('categoryInput');
+      const cityLabel = cityConfig(cityInput.value)?.label || cityInput.value;
+      const categoryOption = categoryInput.options[categoryInput.selectedIndex];
+      const categoryLabel = categoryOption ? categoryOption.text.split(' (')[0] : categoryInput.value;
+      document.getElementById('cityCategorySummary').textContent = `${cityLabel} · ${categoryLabel}`;
     }
 
     function defaultFormCity() {
@@ -2011,6 +2075,7 @@
     // shown, since they were queried under the old city's countrycodes/viewbox.
     document.getElementById('cityInput').addEventListener('change', () => {
       hideAutocomplete();
+      updateCityCategorySummary();
     });
 
     // A category IS the mode: 'district'/'street' mean "fetch an OSM shape,"
@@ -2030,6 +2095,7 @@
         ? 'Neighborhood/street name to search OSM for (e.g. Nørrebro)'
         : 'Search for a place...';
       hideAutocomplete();
+      updateCityCategorySummary();
     });
 
     function closeAddForm() {
