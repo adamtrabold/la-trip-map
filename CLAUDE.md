@@ -50,3 +50,37 @@ temporary simplification.**
   open. Prefer pasting copy-pasteable text directly in chat, or an Artifact
   with a copy button, over `SendUserFile` for anything they need to paste
   elsewhere (like SQL for the Supabase editor).
+
+## Open items (as of 2026-09-19)
+
+Update this list as items get resolved or new ones surface — don't let it
+go stale, and don't leave it silently out of date either.
+
+**Needs the user's action:**
+- Confirm the `20260920000000_add_cities_table.sql` migration has actually
+  been run. Until it is, `fetchCities()` throws on every load (the `cities`
+  table doesn't exist yet), Phase 4 auto-detection silently no-ops back to
+  the static `CITIES` bootstrap, and the error banner flashes on load
+  (masked a moment later by an unrelated successful fetch calling
+  `hideError()` — see the bug noted below).
+
+**Data cleanup (neighborhood shapes):**
+- `reykjavik-klapparstigur` was excluded from the seeded shapes — 14 of 43
+  fetched geometry points jumped ~50km south to Keflavík (Overpass merged
+  in an unrelated way sharing the street name). Needs a re-fetch or manual
+  fix before it's added.
+- `copenhagen-nyboder` (Nyboder) and `stockholm-gamla-stan` (Gamla Stan)
+  have no auto-fetched geometry — need manual tracing via geojson.io.
+
+**Known minor bugs (not fixed, flagged not silently dropped):**
+- `showError()`/`hideError()` share one global banner with no source
+  tracking, so an unrelated successful fetch's `hideError()` can mask a
+  real error before the user reads it.
+- `slugifyCityId()` doesn't decompose Nordic `ø`/`Ø` (e.g. "Nørrebro" →
+  "n-rrebro") — cosmetic only, still produces a valid unique slug.
+
+**Deferred roadmap (not started):**
+- Phase 2 — trip context (dates/closures) and shared traits (kid-friendly,
+  vegetarian, etc.) across both pins and shapes.
+- SRI hashing on the CDN script tags.
+- Nominatim autocomplete-while-typing (currently only fires on submit).
