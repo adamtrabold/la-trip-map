@@ -1969,20 +1969,29 @@
       return layer;
     }
 
-    // Mirrors visibleLocations()'s city predicate only -- categories don't
-    // apply to shapes, they're not `locations` rows.
+    // City + category filtered, no zoom involved -- this is "what matches the
+    // user's filters," used by the sidebar list/count. A list enumerates
+    // everything available; it isn't a viewport, so zoom has no business
+    // hiding rows from it (unlike the map layer, see mapVisibleNeighborhoodShapes()).
     function visibleNeighborhoodShapes() {
-      const zoom = map.getZoom();
       return neighborhoodShapes.filter(nb => {
         if (!filters.categories[nb.type]) return false;   // same category filter chips as pins
         if (!isAllCities() && nb.city !== activeCity) return false;
-        return zoom >= neighborhoodMinZoom(nb);
+        return true;
       });
+    }
+
+    // Adds the zoom gate on top of visibleNeighborhoodShapes() -- only this
+    // one feeds the actual map layer, so the map still stays uncluttered when
+    // zoomed out while the list shows everything that matches the filters.
+    function mapVisibleNeighborhoodShapes() {
+      const zoom = map.getZoom();
+      return visibleNeighborhoodShapes().filter(nb => zoom >= neighborhoodMinZoom(nb));
     }
 
     function syncNeighborhoodLayers() {
       if (!map) return;
-      const shouldShow = new Set(visibleNeighborhoodShapes().map(nb => nb.id));
+      const shouldShow = new Set(mapVisibleNeighborhoodShapes().map(nb => nb.id));
 
       shouldShow.forEach(id => {
         if (neighborhoodLayersById.has(id)) return;
