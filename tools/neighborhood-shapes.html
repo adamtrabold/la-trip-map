@@ -41,6 +41,34 @@
 <p id="count"></p>
 <button id="startBtn">Start (~25s for 15 shapes)</button>
 <div id="progress"></div>
+
+<div class="card" style="background:#FBF3EE;">
+  <h3 style="margin-bottom:0.6rem;">Add one more shape later</h3>
+  <p style="margin:0 0 0.7rem 0; font-size:0.85rem; color:#555;">
+    For any neighborhood/street you want to add after today — no need to edit this file's code. Type it in,
+    fetch it, and paste the result into <code>index.html</code>'s <code>NEIGHBORHOODS</code> object yourself.
+    Still a one-time, static addition — this just automates the OSM lookup.
+  </p>
+  <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="text" id="adhocName" placeholder="Name to search OSM for (e.g. Nørrebro)" style="flex:2; min-width:200px; padding:0.4rem;">
+    <select id="adhocCity" style="padding:0.4rem;">
+      <option value="reykjavik">Reykjavik</option>
+      <option value="copenhagen">Copenhagen</option>
+      <option value="malmo">Malmö</option>
+      <option value="stockholm">Stockholm</option>
+    </select>
+    <select id="adhocType" style="padding:0.4rem;">
+      <option value="district">District (polygon)</option>
+      <option value="street">Street (line)</option>
+    </select>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="text" id="adhocLabel" placeholder="Display label (optional, defaults to the name)" style="flex:1; min-width:200px; padding:0.4rem;">
+    <input type="text" id="adhocId" placeholder="NEIGHBORHOODS id (optional, auto-generated)" style="flex:1; min-width:200px; padding:0.4rem;">
+  </div>
+  <button id="adhocFetchBtn">Fetch this shape</button>
+</div>
+
 <button id="genBtn" style="display:none">Generate NEIGHBORHOODS code from current selections</button>
 <div id="summary"></div>
 <textarea id="output" placeholder="Paste-ready NEIGHBORHOODS code appears here..." readonly></textarea>
@@ -254,6 +282,47 @@ function generateCode() {
 }
 
 document.getElementById('genBtn').onclick = generateCode;
+
+function slugify(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+document.getElementById('adhocFetchBtn').onclick = async () => {
+  const name = document.getElementById('adhocName').value.trim();
+  if (!name) { alert('Enter a name to search for.'); return; }
+  const city = document.getElementById('adhocCity').value;
+  const type = document.getElementById('adhocType').value;
+  const label = document.getElementById('adhocLabel').value.trim() || name;
+  const id = document.getElementById('adhocId').value.trim() || `${city}-${slugify(name)}`;
+  const shape = { id, city, type, label, queryName: name };
+  const cfg = CITIES[city];
+
+  const btn = document.getElementById('adhocFetchBtn');
+  btn.disabled = true;
+  btn.textContent = 'Fetching…';
+
+  let geometry = null;
+  try {
+    geometry = type === 'street' ? await fetchStreetWay(shape, cfg) : await fetchDistrictPolygon(shape, cfg);
+  } catch (e) {
+    geometry = null;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Fetch this shape';
+
+  window._triplet_shapes = window._triplet_shapes || [];
+  const idx = window._triplet_shapes.length;
+  window._triplet_shapes.push({ shape, geometry });
+  document.getElementById('cards').appendChild(renderCard(shape, geometry, idx));
+  document.getElementById('genBtn').style.display = 'inline-block';
+  generateCode();
+
+  document.getElementById('adhocName').value = '';
+  document.getElementById('adhocLabel').value = '';
+  document.getElementById('adhocId').value = '';
+};
 </script>
 </body>
 </html>
