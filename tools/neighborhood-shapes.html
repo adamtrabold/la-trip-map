@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Triplet — Neighborhood Shape Fetcher</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  p.desc { color: #555; line-height: 1.5; }
+  button { background: #A8C5DD; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #progress { margin: 0.75rem 0; font-weight: 600; }
+  #genBtn { position: sticky; top: 0; z-index: 10; margin-bottom: 1rem; }
+  .card { border: 1px solid #ddd; border-radius: 0.5rem; padding: 0.9rem 1rem; margin-bottom: 0.9rem; background: #fff; }
+  .card.needs-trace { border-color: #C97850; background: #FBF3EE; }
+  .card.ok { border-color: #4a7c3f; }
+  .card h3 { margin: 0 0 0.2rem 0; font-size: 1rem; }
+  .card .meta { color: #888; font-size: 0.78rem; margin-bottom: 0.5rem; }
+  .card .status { font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .card .status.ok { color: #4a7c3f; }
+  .card .status.warn { color: #C97850; }
+  .previewMap { width: 100%; height: 220px; border-radius: 0.4rem; margin-bottom: 0.5rem; background: #eee; }
+  .card label { display: block; font-size: 0.85rem; margin-bottom: 0.4rem; cursor: pointer; }
+  textarea.codeOut { width: 100%; height: 90px; font-family: ui-monospace, monospace; font-size: 0.75rem; box-sizing: border-box; }
+  #output { width: 100%; height: 340px; font-family: ui-monospace, monospace; font-size: 0.8rem; margin: 1rem 0; box-sizing: border-box; }
+  #summary { font-weight: 600; margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+<h1>Triplet — Neighborhood Shape Fetcher</h1>
+<p class="desc">
+  Fetches real OpenStreetMap geometry automatically — <strong>no manual tracing required</strong> for anything
+  OSM already has on file. Districts query Nominatim for the actual administrative/place boundary polygon;
+  streets query Overpass for the actual mapped street path. Every fetched shape is drawn on a small preview map
+  so you can visually confirm it looks right before accepting — that's a stronger check than eyeballing raw
+  coordinates. Anything OSM doesn't have (an informal grouping with no boundary relation) is flagged
+  "needs manual trace" — see the plan doc's §10 for that fallback. Runs at a polite ~1.5s between requests.
+</p>
+<p id="count"></p>
+<button id="startBtn">Start (~25s for 15 shapes)</button>
+<div id="progress"></div>
+<button id="genBtn" style="display:none">Generate NEIGHBORHOODS code from current selections</button>
+<div id="summary"></div>
+<textarea id="output" placeholder="Paste-ready NEIGHBORHOODS code appears here..." readonly></textarea>
+<div id="cards"></div>
+
+<script>
+const CITIES = {
+  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland',   bbox: [63.900,-22.700,64.300,-21.200] },
+  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København', bbox: [55.610,12.450,55.750,12.700] },
+  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö',      bbox: [55.530,12.900,55.650,13.120] },
+  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm',  bbox: [59.250,17.850,59.420,18.220] }
+};
+
+// From the plan doc's §11 checklist. queryName is what we search OSM for;
+// it's usually the same as label but can be tuned separately.
+const SHAPES = [
+  {id:'reykjavik-grandi', city:'reykjavik', type:'district', label:'Grandi (Old Harbour creative district)', queryName:'Grandi'},
+  {id:'reykjavik-laugavegur', city:'reykjavik', type:'street', label:'Laugavegur', queryName:'Laugavegur'},
+  {id:'reykjavik-grandagardur', city:'reykjavik', type:'street', label:'Grandagarður (mural street)', queryName:'Grandagarður'},
+  {id:'reykjavik-skolavordustigur', city:'reykjavik', type:'street', label:'Skólavörðustígur (Rainbow Street)', queryName:'Skólavörðustígur'},
+  {id:'reykjavik-klapparstigur', city:'reykjavik', type:'street', label:'Klapparstígur', queryName:'Klapparstígur'},
+  {id:'copenhagen-nyhavn', city:'copenhagen', type:'district', label:'Nyhavn', queryName:'Nyhavn'},
+  {id:'copenhagen-jaegersborggade', city:'copenhagen', type:'street', label:'Jægersborggade', queryName:'Jægersborggade'},
+  {id:'copenhagen-christiania', city:'copenhagen', type:'district', label:'Freetown Christiania', queryName:'Christiania'},
+  {id:'copenhagen-nyboder', city:'copenhagen', type:'district', label:'Nyboder', queryName:'Nyboder'},
+  {id:'malmo-mollevangstorget', city:'malmo', type:'district', label:"Möllevångstorget (Möllan)", queryName:'Möllevången'},
+  {id:'malmo-vastra-hamnen-bo01', city:'malmo', type:'district', label:'Västra Hamnen Bo01', queryName:'Västra Hamnen'},
+  {id:'stockholm-gamla-stan', city:'stockholm', type:'district', label:'Gamla Stan', queryName:'Gamla Stan'},
+  {id:'stockholm-djurgarden', city:'stockholm', type:'district', label:'Djurgården', queryName:'Djurgården'},
+  {id:'stockholm-sofo-triangle', city:'stockholm', type:'street', label:'Bondegatan (SoFo triangle anchor street)', queryName:'Bondegatan'},
+  {id:'stockholm-skogskyrkogarden', city:'stockholm', type:'district', label:'Skogskyrkogården', queryName:'Skogskyrkogården'}
+];
+
+document.getElementById('count').textContent = SHAPES.length + ' shapes to fetch automatically.';
+
+function esc(s) { return (s || '').replace(/'/g, "''"); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function fetchDistrictPolygon(shape, cfg) {
+  const params = new URLSearchParams({
+    format: 'json', polygon_geojson: '1', limit: '1',
+    q: `${shape.queryName}, ${cfg.suffix}`,
+    countrycodes: cfg.countrycodes, viewbox: cfg.viewbox
+  });
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.length || !data[0].geojson) return null;
+  const gj = data[0].geojson;
+  let ring;
+  if (gj.type === 'Polygon') ring = gj.coordinates[0];
+  else if (gj.type === 'MultiPolygon') ring = gj.coordinates[0][0];
+  else return null; // Point/LineString boundary isn't usable as a district fill
+  // GeoJSON is [lng, lat] -- convert to this app's [lat, lng] convention.
+  return ring.map(([lng, lat]) => [lat, lng]);
+}
+
+async function fetchStreetWay(shape, cfg) {
+  const [south, west, north, east] = cfg.bbox;
+  const query = `[out:json][timeout:15];way["name"="${shape.queryName}"]["highway"](${south},${west},${north},${east});out geom;`;
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    body: `data=${encodeURIComponent(query)}`
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.elements || !data.elements.length) return null;
+  // A named street is often split into several OSM ways (segments) -- merge all
+  // segments' points into one path. Overpass geometry nodes are {lat, lon} already,
+  // so no coordinate-order conversion is needed here.
+  const points = [];
+  data.elements.forEach(el => {
+    if (!el.geometry) return;
+    el.geometry.forEach(pt => points.push([pt.lat, pt.lon]));
+  });
+  return points.length ? points : null;
+}
+
+function centroidOf(points) {
+  const lat = points.reduce((s, p) => s + p[0], 0) / points.length;
+  const lng = points.reduce((s, p) => s + p[1], 0) / points.length;
+  return [lat, lng];
+}
+
+function renderPreview(container, shape, geometry) {
+  const mapDiv = document.createElement('div');
+  mapDiv.className = 'previewMap';
+  container.appendChild(mapDiv);
+  // Deferred init so the div has layout dimensions before Leaflet measures it.
+  setTimeout(() => {
+    const map = L.map(mapDiv, { zoomControl: false, attributionControl: false });
+    const layer = shape.type === 'street'
+      ? L.polyline(geometry, { color: '#E8B84E', weight: 5 })
+      : L.polygon(geometry, { color: '#A8C5DD', weight: 2, fillOpacity: 0.25 });
+    layer.addTo(map);
+    map.fitBounds(layer.getBounds(), { padding: [12, 12] });
+  }, 0);
+}
+
+function renderCard(shape, geometry, idx) {
+  const card = document.createElement('div');
+  card.className = 'card' + (geometry ? ' ok' : ' needs-trace');
+  card.dataset.idx = idx;
+
+  const h = document.createElement('h3');
+  h.textContent = shape.label;
+  card.appendChild(h);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${shape.city} · ${shape.type} · id: ${shape.id} · queried: "${shape.queryName}"`;
+  card.appendChild(meta);
+
+  const status = document.createElement('div');
+  if (geometry) {
+    status.className = 'status ok';
+    status.textContent = `✓ Found ${geometry.length} points from ${shape.type === 'street' ? 'Overpass (OSM way)' : 'Nominatim (OSM boundary)'}`;
+    card.appendChild(status);
+    renderPreview(card, shape, geometry);
+  } else {
+    status.className = 'status warn';
+    status.textContent = '⚠ No OSM geometry found — needs manual trace (see plan §10)';
+    card.appendChild(status);
+  }
+
+  const label = document.createElement('label');
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.checked = !!geometry;
+  checkbox.disabled = !geometry;
+  checkbox.id = `accept-${idx}`;
+  label.appendChild(checkbox);
+  label.appendChild(document.createTextNode(geometry ? ' Include this shape in the generated code' : ' Not available automatically -- trace by hand instead'));
+  card.appendChild(label);
+
+  return card;
+}
+
+document.getElementById('startBtn').onclick = async () => {
+  document.getElementById('startBtn').disabled = true;
+  const results = [];
+  const cardsEl = document.getElementById('cards');
+  let okCount = 0, missCount = 0;
+
+  for (let i = 0; i < SHAPES.length; i++) {
+    const shape = SHAPES[i];
+    const cfg = CITIES[shape.city];
+    document.getElementById('progress').textContent = `${i + 1} / ${SHAPES.length} — ${shape.label}`;
+
+    let geometry = null;
+    try {
+      geometry = shape.type === 'street'
+        ? await fetchStreetWay(shape, cfg)
+        : await fetchDistrictPolygon(shape, cfg);
+    } catch (e) {
+      geometry = null;
+    }
+
+    if (geometry) okCount++; else missCount++;
+    results[i] = { shape, geometry };
+    cardsEl.appendChild(renderCard(shape, geometry, i));
+    document.getElementById('genBtn').style.display = 'inline-block';
+    await sleep(1500);
+  }
+
+  document.getElementById('progress').textContent =
+    `Done. ${okCount} fetched automatically, ${missCount} need manual tracing.`;
+  document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
+  document.getElementById('startBtn').disabled = false;
+  window._triplet_shapes = results;
+  generateCode();
+};
+
+function generateCode() {
+  const results = window._triplet_shapes || [];
+  const accepted = [];
+  const skipped = [];
+
+  results.forEach(({ shape, geometry }, idx) => {
+    const checkbox = document.getElementById(`accept-${idx}`);
+    if (checkbox && checkbox.checked && geometry) {
+      accepted.push({ shape, geometry });
+    } else {
+      skipped.push(shape);
+    }
+  });
+
+  let out = `// Generated ${new Date().toISOString()} -- ${accepted.length} fetched automatically from OSM, ${skipped.length} need manual tracing.\n`;
+  out += `// Colors below are placeholders -- adjust to taste. minZoom omitted -- defaults to cityConfig(city).zoom + 3 (see plan §4).\n`;
+  out += `const NEIGHBORHOODS = {\n`;
+  out += accepted.map(({ shape, geometry }) => {
+    const geomStr = geometry.map(([lat, lng]) => `[${lat.toFixed(5)}, ${lng.toFixed(5)}]`).join(', ');
+    return `  '${shape.id}': {\n` +
+           `    city: '${shape.city}',\n` +
+           `    type: '${shape.type}',\n` +
+           `    label: '${esc(shape.label)}',\n` +
+           `    color: '${shape.type === 'street' ? '#E8B84E' : '#A8C5DD'}',\n` +
+           `    note: null,\n` +
+           `    geometry: [${geomStr}]\n` +
+           `  }`;
+  }).join(',\n') + '\n';
+  out += `};\n`;
+
+  if (skipped.length) {
+    out += `\n// NEEDS MANUAL TRACING (no OSM geometry found -- see plan §10 for the geojson.io workflow):\n`;
+    skipped.forEach(s => { out += `//   [${s.city}] ${s.label} (${s.type}, id: ${s.id})\n`; });
+  }
+
+  document.getElementById('output').value = out;
+  document.getElementById('summary').textContent = `${accepted.length} ready to paste, ${skipped.length} need manual tracing.`;
+}
+
+document.getElementById('genBtn').onclick = generateCode;
+</script>
+</body>
+</html>
