@@ -782,6 +782,12 @@
           </select>
         </div>
         <p id="shapeHint" class="mode-toggle-hint" style="display:none;">Traces this from OpenStreetMap as a map shape instead of a single pin — no address needed.</p>
+        <div id="shapeCityConfirm" class="new-city-confirm" style="display:none;">
+          <p id="shapeCityConfirmText"></p>
+          <button type="button" id="shapeCityConfirmAddCity">Add city</button>
+          <button type="button" id="shapeCityConfirmAddTo" class="secondary"></button>
+          <button type="button" id="shapeCityConfirmCancel" class="secondary">Cancel</button>
+        </div>
 
         <div id="addressInputWrapper">
           <input type="text" id="nameInput" placeholder="Search for a place..." required autocomplete="off">
@@ -1027,9 +1033,9 @@
           lastPayloadDigest = digest;
           updateUI();
         }
-        hideError();
+        hideError('locations');
       } catch (err) {
-        showError(`Failed to load: ${err.message}`);
+        showError(`Failed to load: ${err.message}`, 'locations');
       }
     }
 
@@ -1058,8 +1064,9 @@
         if (error) throw error;
         neighborhoodShapes = data || [];
         updateUI();   // refreshes the list count/cards too, not just the map layers
+        hideError('shapes');
       } catch (err) {
-        showError(`Failed to load neighborhood shapes: ${err.message}`);
+        showError(`Failed to load neighborhood shapes: ${err.message}`, 'shapes');
       }
     }
 
@@ -1085,8 +1092,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
       }
     }
 
@@ -1100,8 +1108,9 @@
 
         if (error) throw error;
         await fetchNeighborhoodShapes();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
       }
     }
 
@@ -1116,8 +1125,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'delete'));
+        showError(handleRLSError(err, 'delete'), 'mutation');
       }
     }
 
@@ -1132,8 +1142,9 @@
 
         if (error) throw error;
         await fetchNeighborhoodShapes();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'delete'));
+        showError(handleRLSError(err, 'delete'), 'mutation');
       }
     }
 
@@ -1148,8 +1159,9 @@
 
         if (error) throw error;
         await refetchLocations();
+        hideError('mutation');
       } catch (err) {
-        showError(handleRLSError(err, 'update'));
+        showError(handleRLSError(err, 'update'), 'mutation');
       }
     }
     
@@ -1216,13 +1228,19 @@
         const data = await response.json();
         if (!data.elements || !data.elements.length) return null;
         // A street is often split into several OSM way segments -- merge all
-        // of them into one path.
+        // of them into one path, but keep each element's point count so a
+        // caller can still tell them apart (resolveShapeCity() uses this to
+        // drop a whole mismatched-city segment instead of voting point by
+        // point).
         const points = [];
+        const segmentLengths = [];
         data.elements.forEach(el => {
           if (!el.geometry) return;
+          const before = points.length;
           el.geometry.forEach(pt => points.push([pt.lat, pt.lon]));
+          segmentLengths.push(points.length - before);
         });
-        return points.length ? points : null;
+        return points.length ? { points, segmentLengths } : null;
       } catch (err) {
         return null;
       }
@@ -1563,8 +1581,84 @@
       )[0];
     }
 
+    // Reverse-geocodes a point to settlement-level address details, needed
+    // to derive a new-city candidate from a fetched SHAPE (unlike a POI
+    // search result, Overpass/the polygon fetch return no addressDetails
+    // of their own).
+    async function nominatimReverse(lat, lng) {
+      try {
+        const params = new URLSearchParams({ format: 'json', lat: String(lat), lon: String(lng), addressdetails: '1', zoom: '10' });
+        const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`, { signal: AbortSignal.timeout(8000) });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data && data.address ? data.address : null;
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // Classifies a fetched shape's geometry against CITIES, robust to two
+    // distinct failure modes: (a) a shape legitimately straddling two
+    // cities' bounds, and (b) a spurious OSM merge dragging in an unrelated
+    // cluster of points (e.g. the Klapparstígur bug: a same-named way ~50km
+    // away in Keflavík got merged into the Reykjavík street fetch).
+    // `segmentLengths`, when given (one entry per Overpass way element, in
+    // the same order the points were concatenated), lets a whole outlier
+    // SEGMENT get dropped rather than diluting the vote point-by-point --
+    // that's what actually catches the Keflavík fragment. Districts (a
+    // single connected polygon ring, no segments) just vote point-by-point;
+    // there's no sub-shape to drop.
+    const SHAPE_CITY_CONFIDENT_SHARE = 0.6;
+
+    function resolveShapeCity(geometry, segmentLengths) {
+      const lengths = segmentLengths && segmentLengths.length ? segmentLengths : [geometry.length];
+      let offset = 0;
+      const segments = lengths.map(len => {
+        const pts = geometry.slice(offset, offset + len);
+        offset += len;
+        const votes = {};
+        pts.forEach(([lat, lng]) => {
+          const city = matchCity(lat, lng);
+          if (city) votes[city] = (votes[city] || 0) + 1;
+        });
+        const winner = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0] || null;
+        return { pts, winner };
+      });
+
+      const tally = {};
+      segments.forEach(seg => { if (seg.winner) tally[seg.winner] = (tally[seg.winner] || 0) + seg.pts.length; });
+      const ranked = Object.keys(tally).sort((a, b) => tally[b] - tally[a]);
+      const winner = ranked[0] || null;
+      const winnerShare = winner ? tally[winner] / geometry.length : 0;
+      const runnerUp = ranked[1] || null;
+
+      // Keep only segments that agree with the (possibly unconfident)
+      // winner -- with no winner at all, there's nothing to compare
+      // against yet, so nothing gets dropped.
+      const keptSegments = winner ? segments.filter(seg => seg.winner === winner) : segments;
+      const cleanedGeometry = keptSegments.length ? [].concat(...keptSegments.map(s => s.pts)) : geometry;
+      const droppedPoints = geometry.length - cleanedGeometry.length;
+
+      const centroid = cleanedGeometry
+        .reduce((acc, [lat, lng]) => [acc[0] + lat, acc[1] + lng], [0, 0])
+        .map(sum => sum / cleanedGeometry.length);
+
+      return {
+        winner, winnerShare, runnerUp, cleanedGeometry, droppedPoints, centroid,
+        confident: !!winner && winnerShare >= SHAPE_CITY_CONFIDENT_SHARE
+      };
+    }
+
+    // NFD-decomposing alone doesn't touch Nordic letters that have no
+    // canonical base+diacritic decomposition (ø, æ, å, þ, ð aren't
+    // "o with a combining mark" in Unicode, they're their own codepoints)
+    // -- e.g. "Nørrebro" NFD-stripped to "n-rrebro" instead of "norrebro".
+    // Map those explicitly before the generic strip.
     function slugifyCityId(label) {
-      return label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      return label
+        .replace(/[øØ]/g, 'o').replace(/[æÆ]/g, 'ae').replace(/[åÅ]/g, 'a')
+        .replace(/[þÞ]/g, 'th').replace(/[ðÐ]/g, 'd')
+        .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
         .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     }
 
@@ -1643,9 +1737,10 @@
         }]);
         if (error) throw error;
         mergeCityIntoRuntime(cfg);
+        hideError('mutation');
         return true;
       } catch (err) {
-        showError(handleRLSError(err, 'add'));
+        showError(handleRLSError(err, 'add'), 'mutation');
         return false;
       }
     }
@@ -1670,8 +1765,9 @@
         populateCityInput();
         createCitySelector();
         updateCitySelectorUI();
+        hideError('cities');
       } catch (err) {
-        showError(`Failed to load cities: ${err.message}`);
+        showError(`Failed to load cities: ${err.message}`, 'cities');
       }
     }
 
@@ -1782,7 +1878,7 @@
       const btn = document.getElementById('centerMeBtn');
       
       if (!navigator.geolocation) {
-        showError('Geolocation is not supported by your browser');
+        showError('Geolocation is not supported by your browser', 'geolocation');
         return;
       }
       
@@ -1812,7 +1908,7 @@
           focusMap([latitude, longitude], 14, { animate: true });
 
           btn.classList.remove('loading');
-          hideError();
+          hideError('geolocation');
         },
         (error) => {
           btn.classList.remove('loading');
@@ -1830,7 +1926,7 @@
               break;
           }
           
-          showError(errorMsg);
+          showError(errorMsg, 'geolocation');
         },
         {
           enableHighAccuracy: true,
@@ -1840,12 +1936,24 @@
       );
     }
     
-    function showError(msg) {
+    // The banner is a single shared DOM element, but errors come from
+    // unrelated sources (the locations poll, the shapes fetch, a mutation,
+    // geolocation) -- without tracking which one is currently showing, any
+    // OTHER source's success would call hideError() and mask a real error
+    // before it's read. hideError(source) only clears when it matches
+    // whoever's currently showing; the newest showError() always wins the
+    // single banner slot outright, since only one message fits at a time.
+    let currentErrorSource = null;
+
+    function showError(msg, source) {
+      currentErrorSource = source;
       document.getElementById('errorText').textContent = msg;
       document.getElementById('error').classList.add('show');
     }
-    
-    function hideError() {
+
+    function hideError(source) {
+      if (source !== currentErrorSource) return;
+      currentErrorSource = null;
       document.getElementById('error').classList.remove('show');
     }
 
@@ -2465,6 +2573,7 @@
       selectedPlace = null;
       userOverrodeCity = false;
       hideNewCityConfirm();
+      hideShapeCityConfirm();
       document.getElementById('nameInput').value = '';
       document.getElementById('addressInput').value = '';
       document.getElementById('notesInput').value = '';
@@ -2478,15 +2587,81 @@
       document.getElementById('submitBtn').disabled = false;
     }
 
+    // ---- shape-flow city resolution (post-fetch) ------------------------
+
+    let pendingShapeCity = null;   // { resolved, saveShape } while shapeCityConfirm is showing
+
+    function hideShapeCityConfirm() {
+      pendingShapeCity = null;
+      document.getElementById('shapeCityConfirm').style.display = 'none';
+    }
+
+    // Analogue of showNewCityConfirm() for the shape flow -- but unlike a
+    // pin (one point, matched or not), a shape's geometry has already been
+    // through resolveShapeCity(), which may have a best-guess existing city
+    // even when it isn't confident. Offer that as a one-tap alternative to
+    // creating a new city, rather than only create-or-abandon.
+    function showShapeCityConfirm(resolved, saveShape) {
+      pendingShapeCity = { resolved, saveShape };
+      const addToBtn = document.getElementById('shapeCityConfirmAddTo');
+      if (resolved.winner) {
+        addToBtn.style.display = '';
+        addToBtn.textContent = `Add to ${cityConfig(resolved.winner).label}`;
+        document.getElementById('shapeCityConfirmText').textContent =
+          `This doesn't clearly fit ${cityConfig(resolved.winner).label}. Add it as a new city, or file it under ${cityConfig(resolved.winner).label} anyway?`;
+      } else {
+        addToBtn.style.display = 'none';
+        document.getElementById('shapeCityConfirmText').textContent =
+          `This doesn't match any known city. Add it as a new city?`;
+      }
+      document.getElementById('shapeCityConfirm').style.display = '';
+    }
+
+    document.getElementById('shapeCityConfirmAddCity').onclick = async () => {
+      if (!pendingShapeCity) return;
+      const { resolved, saveShape } = pendingShapeCity;
+      const btn = document.getElementById('shapeCityConfirmAddCity');
+      btn.disabled = true;
+      const addressDetails = await nominatimReverse(resolved.centroid[0], resolved.centroid[1]);
+      const cfg = addressDetails ? await deriveNewCityConfig(addressDetails, resolved.centroid[0], resolved.centroid[1]) : null;
+      btn.disabled = false;
+      if (!cfg) {
+        alert('Could not determine a new city from this location. Try "Add to" an existing city instead.');
+        return;
+      }
+      const ok = await addCity(cfg);
+      if (!ok) return;
+      hideShapeCityConfirm();
+      await saveShape(cfg.id);
+    };
+
+    document.getElementById('shapeCityConfirmAddTo').onclick = async () => {
+      if (!pendingShapeCity || !pendingShapeCity.resolved.winner) return;
+      const { resolved, saveShape } = pendingShapeCity;
+      hideShapeCityConfirm();
+      await saveShape(resolved.winner);
+    };
+
+    document.getElementById('shapeCityConfirmCancel').onclick = () => {
+      hideShapeCityConfirm();
+      document.getElementById('submitBtn').textContent = 'Add Location';
+      document.getElementById('submitBtn').disabled = false;
+    };
+
     // A single OSM lookup, one click, one form -- fetch and save happen
     // together so there is no separate authoring step for a shape added this
     // way (unlike tools/neighborhood-shapes.html, which is for bulk/offline
-    // authoring and produces code to paste in by hand).
+    // authoring and produces code to paste in by hand). The pre-fetch
+    // cityInput selection only biases the OSM query (viewbox/countrycodes) --
+    // the row's actual `city` is resolved from the fetched geometry itself
+    // via resolveShapeCity(), which is robust to (a) a shape straddling two
+    // cities' bounds and (b) a spurious OSM merge dragging in an unrelated
+    // cluster of points (see resolveShapeCity()'s doc comment).
     async function handleAddShapeSubmit() {
       const name = document.getElementById('nameInput').value.trim();
       const type = document.getElementById('categoryInput').value;   // 'district' | 'street'
       const notes = document.getElementById('notesInput').value.trim();
-      const city = formCityId();
+      const cityHint = formCityId();
 
       if (!name) {
         alert('Please provide a name to search for.');
@@ -2497,28 +2672,46 @@
       document.getElementById('submitBtn').textContent = 'Fetching area...';
       document.getElementById('submitBtn').disabled = true;
 
-      const cfg = cityConfig(city);
-      const geometry = type === 'street'
+      const cfg = cityConfig(cityHint);
+      const fetched = type === 'street'
         ? await overpassWay(name, cfg)
         : await nominatimPolygon(name, cfg);
 
-      if (!geometry) {
+      if (!fetched) {
         alert(`Could not find "${name}" on OpenStreetMap as a ${type}. Try a more specific or differently-spelled name, or trace it by hand with tools/neighborhood-shapes.html.`);
         document.getElementById('submitBtn').textContent = 'Add Location';
         document.getElementById('submitBtn').disabled = false;
         return;
       }
 
-      await addNeighborhoodShape({
-        city,
-        type,
-        label: name,
-        color: CATEGORY_COLORS[type],
-        note: notes || null,
-        geometry
-      });
+      const geometry = type === 'street' ? fetched.points : fetched;
+      const segmentLengths = type === 'street' ? fetched.segmentLengths : null;
+      const resolved = resolveShapeCity(geometry, segmentLengths);
 
-      closeAddForm();
+      if (resolved.droppedPoints) {
+        console.warn(`"${name}": dropped ${resolved.droppedPoints} point(s) that disagreed with the majority city (likely an unrelated OSM way merged in).`);
+      }
+
+      const saveShape = async (city) => {
+        await addNeighborhoodShape({
+          city,
+          type,
+          label: name,
+          color: CATEGORY_COLORS[type],
+          note: notes || null,
+          geometry: resolved.cleanedGeometry
+        });
+        closeAddForm();
+      };
+
+      if (resolved.confident) {
+        await saveShape(resolved.winner);
+        return;
+      }
+
+      document.getElementById('submitBtn').textContent = 'Add Location';
+      document.getElementById('submitBtn').disabled = false;
+      showShapeCityConfirm(resolved, saveShape);
     }
 
     async function handleAddLocationSubmit() {
