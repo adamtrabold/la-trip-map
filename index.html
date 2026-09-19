@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Tripline</title>
+  <title>Triplet</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
@@ -801,7 +801,7 @@
 
     const DEFAULT_CITY = 'la';
     const ALL_CITIES   = '__all__';   // explicit, persisted sentinel for "all cities"
-    const CITY_STORAGE_KEY = 'tripline.citySelection';
+    const CITY_STORAGE_KEY = 'triplet.citySelection';
 
     let citySelection = DEFAULT_CITY; // 'la' | … | ALL_CITIES — what the selector shows
     let activeCity    = DEFAULT_CITY; // ALWAYS a real CITIES key — authoring/viewport context

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tripline — Geocoder Retry (batch 2, misses only)</title>
+<title>Triplet — Geocoder Retry (batch 2, misses only)</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 1.4rem; }
@@ -18,7 +18,7 @@
 </style>
 </head>
 <body>
-<h1>Tripline — Geocoder Retry (batch 2)</h1>
+<h1>Triplet — Geocoder Retry (batch 2)</h1>
 <p class="desc">
   Just the 57 places batch 1 missed. Uses a slower rate (1 request per 2.5s, vs 1.1s in batch 1) since the
   original miss pattern — nearly every Malmö place with a full street address came back empty — looks like
@@ -160,7 +160,7 @@ document.getElementById('startBtn').onclick = async () => {
     await sleep(2500); // slower than batch 1's 1.1s
   }
 
-  let sql = `-- Tripline location import — batch 2 (retry), generated ${new Date().toISOString()}\n`;
+  let sql = `-- Triplet location import — batch 2 (retry), generated ${new Date().toISOString()}\n`;
   sql += `-- ${rows.length} recovered, ${stillMissed.length} still missing after retry.\n\n`;
   sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
   sql += rows.map(r =>

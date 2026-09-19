@@ -1,4 +1,4 @@
-# Tripline
+# Triplet
 
 [Status: Supabase archived due to inactivity, so will not work until I activate for the next trip :)]
 

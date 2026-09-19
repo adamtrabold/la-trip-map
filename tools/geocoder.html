@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tripline — Bulk Location Geocoder (one-time tool)</title>
+<title>Triplet — Bulk Location Geocoder (one-time tool)</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 1.4rem; }
@@ -18,7 +18,7 @@
 </style>
 </head>
 <body>
-<h1>Tripline — Bulk Location Geocoder</h1>
+<h1>Triplet — Bulk Location Geocoder</h1>
 <p class="desc">
   One-time local tool. Geocodes all Reykjavik/Copenhagen/Malmö/Stockholm places from the trip doc using
   Nominatim, directly from your browser (not behind any sandbox network restriction). Respects Nominatim's
@@ -264,7 +264,7 @@ document.getElementById('startBtn').onclick = async () => {
     await sleep(1100); // Nominatim policy: max 1 req/sec
   }
 
-  let sql = `-- Tripline location import — generated ${new Date().toISOString()}\n`;
+  let sql = `-- Triplet location import — generated ${new Date().toISOString()}\n`;
   sql += `-- ${rows.length} places geocoded, ${missed.length} skipped (see list below).\n`;
   sql += `-- Review before running, especially any row whose notes mention "confirm" or "verify".\n\n`;
   sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;

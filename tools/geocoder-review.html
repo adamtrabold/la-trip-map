@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Tripline — Geocoder with Review</title>
+<title>Triplet — Geocoder with Review</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 1.4rem; }
@@ -30,7 +30,7 @@
 </style>
 </head>
 <body>
-<h1>Tripline — Geocoder with Review</h1>
+<h1>Triplet — Geocoder with Review</h1>
 <p class="desc">
   Fetches up to 4 Nominatim candidates per place (address-only AND name-based when an address is known, merged
   together). The closest plausible candidate is <strong>auto-accepted automatically</strong> — no clicking
@@ -386,12 +386,12 @@ document.getElementById('startBtn').onclick = async () => {
     `Done. ${autoCount} auto-accepted, ${reviewCount} need your review (expanded below). SQL generated automatically.`;
   document.getElementById('startBtn').textContent = 'Fetch again (restarts from scratch)';
   document.getElementById('startBtn').disabled = false;
-  window._tripline_cards = cardsById;
+  window._triplet_cards = cardsById;
   generateSQL();
 };
 
 function generateSQL() {
-  const cardsById = window._tripline_cards || [];
+  const cardsById = window._triplet_cards || [];
   const rows = [];
   const skipped = [];
   cardsById.forEach(({ place, candidates }, idx) => {
@@ -401,7 +401,7 @@ function generateSQL() {
     rows.push({ ...place, lat: c.lat, lng: c.lng, address: c.address });
   });
 
-  let sql = `-- Tripline location import — auto-accepted + reviewed, generated ${new Date().toISOString()}\n`;
+  let sql = `-- Triplet location import — auto-accepted + reviewed, generated ${new Date().toISOString()}\n`;
   sql += `-- ${rows.length} confirmed, ${skipped.length} skipped for manual entry.\n\n`;
   if (rows.length) {
     sql += `INSERT INTO locations (name, address, category, lat, lng, notes, visited, city) VALUES\n`;
