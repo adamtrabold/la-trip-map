@@ -815,10 +815,10 @@
           <input type="checkbox" id="isShapeInput">
           <span class="mode-toggle-track" aria-hidden="true">
             <span class="mode-toggle-thumb"></span>
-            <span class="mode-toggle-text mode-toggle-text--pin">Pin</span>
-            <span class="mode-toggle-text mode-toggle-text--shape">Shape</span>
+            <span class="mode-toggle-text mode-toggle-text--pin">Location</span>
+            <span class="mode-toggle-text mode-toggle-text--shape">Area</span>
           </span>
-          <span class="mode-toggle-hint">Shape mode traces a neighborhood or street area from OpenStreetMap instead of dropping a pin.</span>
+          <span class="mode-toggle-hint">Area mode traces a neighborhood or street from OpenStreetMap instead of adding a single location.</span>
         </label>
 
         <select id="shapeTypeInput" style="display:none;">
@@ -2134,7 +2134,7 @@
       }
 
       noteInteraction();
-      document.getElementById('submitBtn').textContent = 'Fetching shape...';
+      document.getElementById('submitBtn').textContent = 'Fetching area...';
       document.getElementById('submitBtn').disabled = true;
 
       const cfg = cityConfig(city);
