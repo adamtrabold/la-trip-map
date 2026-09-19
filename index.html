@@ -901,6 +901,7 @@
     // ---- reconciler state (Phase 0) -----------------------------------------
     const markersById = new Map();   // id → { marker, signature, loc }
     const cardsById   = new Map();   // id → { el, signature }
+    const shapeCardsById = new Map();   // id → { el, signature } -- neighborhood_shapes' list-panel counterpart to cardsById
     let highlightedId = null;
     let lastPayloadDigest = null;
 
@@ -1056,7 +1057,7 @@
           .select('id,city,type,label,color,note,min_zoom,geometry');
         if (error) throw error;
         neighborhoodShapes = data || [];
-        syncNeighborhoodLayers();
+        updateUI();   // refreshes the list count/cards too, not just the map layers
       } catch (err) {
         showError(`Failed to load neighborhood shapes: ${err.message}`);
       }
@@ -1115,6 +1116,22 @@
 
         if (error) throw error;
         await refetchLocations();
+      } catch (err) {
+        showError(handleRLSError(err, 'delete'));
+      }
+    }
+
+    async function deleteNeighborhoodShape(id) {
+      if (!await requireAuth()) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('neighborhood_shapes')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+        await fetchNeighborhoodShapes();
       } catch (err) {
         showError(handleRLSError(err, 'delete'));
       }
@@ -1910,11 +1927,22 @@
 
     function updateUI() {
       const visible = visibleLocations();
+      const visibleShapes = visibleNeighborhoodShapes();
       document.querySelector('#locationsHeader h2').textContent =
-        `${activeCityLabel()} list (${visible.length})`;
+        `${activeCityLabel()} list (${visible.length + visibleShapes.length})`;
       syncMarkers(visible);
       syncLocationCards(visible);
+      syncShapeCards(visibleShapes, visible.length);
       syncNeighborhoodLayers();
+
+      // Empty state + bottom spacer always come last, after both card kinds.
+      const list = document.getElementById('locationsList');
+      const emptyState = document.getElementById('locationsEmpty');
+      emptyState.style.display = (visible.length + visibleShapes.length) === 0 ? 'block' : 'none';
+      if (list.lastElementChild !== listSpacer) {
+        list.appendChild(emptyState);
+        list.appendChild(listSpacer);
+      }
     }
 
     // ---- neighborhood shape rendering (Phase 3) ------------------------------
@@ -2092,14 +2120,118 @@
         entry.el.remove();
         cardsById.delete(id);
       });
+    }
 
-      // Empty state + bottom spacer always come last.
-      const emptyState = document.getElementById('locationsEmpty');
-      emptyState.style.display = visible.length === 0 ? 'block' : 'none';
-      if (list.lastElementChild !== listSpacer) {
-        list.appendChild(emptyState);
-        list.appendChild(listSpacer);
+    // ---- neighborhood shape list cards ---------------------------------------
+    // Mirrors createCard()/renderCard()/syncLocationCards() for pins, but
+    // shapes have no address/visited state and are framed by bounds, not a
+    // point -- see focusShape(). pinOffset places these cards right after the
+    // pin cards syncLocationCards() just wrote, so the two reconcilers can
+    // share one DOM list without stepping on each other's child indices.
+    function shapeCardSignature(nb) {
+      return [nb.label, nb.type, nb.color].join('|');
+    }
+
+    function focusShape(shapeId) {
+      const nb = neighborhoodShapes.find(n => n.id === shapeId);
+      if (!nb) return;
+
+      noteInteraction();
+      const bounds = L.latLngBounds(nb.geometry).pad(0.15);
+      if (prefersReducedMotion()) {
+        map.fitBounds(bounds, { animate: false });
+      } else {
+        map.flyToBounds(bounds, { duration: 0.5 });
       }
+
+      // zoomend (fired by the above) re-runs syncNeighborhoodLayers, so the
+      // layer may not exist yet on this tick -- give it one before opening.
+      setTimeout(() => {
+        const layer = neighborhoodLayersById.get(shapeId);
+        if (layer) layer.openPopup();
+      }, 300);
+    }
+
+    function createShapeCard(nb) {
+      const el = document.createElement('div');
+      el.className = 'location-card';
+      el.style.cursor = 'pointer';
+      el.setAttribute('data-shape-id', nb.id);
+
+      let touchMoved = false;
+      const addActive = (e) => {
+        if (!e.target.closest('.location-actions')) {
+          touchMoved = false;
+          el.classList.add('active');
+        }
+      };
+      const removeActive = () => el.classList.remove('active');
+      const handleTouchMove = () => { touchMoved = true; removeActive(); };
+
+      el.addEventListener('mousedown', addActive);
+      el.addEventListener('touchstart', addActive, { passive: true });
+      el.addEventListener('touchmove', handleTouchMove, { passive: true });
+      el.addEventListener('mouseup', removeActive);
+      el.addEventListener('mouseleave', removeActive);
+      el.addEventListener('touchend', removeActive);
+      el.addEventListener('touchcancel', removeActive);
+
+      el.addEventListener('click', (e) => {
+        const id = Number(el.getAttribute('data-shape-id'));
+        const current = neighborhoodShapes.find(n => n.id === id);
+
+        if (e.target.closest('.delete-btn')) {
+          if (current) confirmDeleteShape(current.id, current.label);
+          return;
+        }
+        if (touchMoved) return;   // the tap was a scroll
+        focusShape(id);
+      });
+
+      return el;
+    }
+
+    function renderShapeCard(el, nb) {
+      el.style.borderLeftColor = nb.color || CATEGORY_COLORS[nb.type] || CATEGORY_COLORS.other;
+      el.innerHTML = `
+        <h3>${escapeHtml(nb.label)}</h3>
+        <p>${escapeHtml(nb.type)}</p>
+        <div class="location-actions">
+          <button class="delete-btn">×</button>
+        </div>
+      `;
+    }
+
+    function syncShapeCards(visible, pinOffset) {
+      const list = document.getElementById('locationsList');
+      const seen = new Set();
+
+      visible.forEach((nb, index) => {
+        seen.add(nb.id);
+        let entry = shapeCardsById.get(nb.id);
+
+        if (!entry) {
+          entry = { el: createShapeCard(nb), signature: null };
+          shapeCardsById.set(nb.id, entry);
+        }
+
+        const signature = shapeCardSignature(nb);
+        if (signature !== entry.signature) {
+          renderShapeCard(entry.el, nb);
+          entry.signature = signature;
+        }
+
+        const targetIndex = pinOffset + index;
+        if (list.children[targetIndex] !== entry.el) {
+          list.insertBefore(entry.el, list.children[targetIndex] || null);
+        }
+      });
+
+      shapeCardsById.forEach((entry, id) => {
+        if (seen.has(id)) return;
+        entry.el.remove();
+        shapeCardsById.delete(id);
+      });
     }
 
     function createCitySelector() {
@@ -2160,6 +2292,11 @@
     window.confirmDelete = (id, name) => {
       if (confirm(`Delete ${name}?`)) {
         deleteLocation(id);
+      }
+    };
+    window.confirmDeleteShape = (id, label) => {
+      if (confirm(`Delete ${label}?`)) {
+        deleteNeighborhoodShape(id);
       }
     };
     
