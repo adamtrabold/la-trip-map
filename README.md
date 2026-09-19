@@ -1,6 +1,6 @@
 # Triplet
 
-Map view of places we may want to visit on a trip — currently LA, Reykjavík, Copenhagen, Malmö and Stockholm. claude pulls from an apple note screenshot, finds addresses, puts them in supabase. this is an ugly but functional view on their physical location, complete with location access so we can take advantage when another thing we thought might be cool is near where we currently are.
+Map view of places we may want to visit on a trip — currently LA, Reykjavík, Copenhagen, Malmö and Stockholm. claude pulls from a screenshot, finds addresses, gives data to input to supabase (working on direct integration, but sandboxed in claude currently). this is an ugly but functional view on their physical location, complete with location access so we can take advantage when another thing we thought might be cool is near where we currently are.
 
 Switch cities from the filter panel; "All cities" frames everything saved. Each location is tagged with the city it belongs to, and the add-location form has its own city picker that drives both geocoding and the stored row.
 
