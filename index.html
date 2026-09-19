@@ -5,25 +5,109 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Triplet</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- The script face is used for exactly one word, so it is subset to those
+       seven glyphs (~2-3KB) instead of shipping the whole family. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Grand+Hotel&text=Triplet&display=swap">
+  <!-- One variable superfamily covers BOTH voices: wdth 75 is the bold
+       condensed poster/display voice, wdth 100 the neutral UI voice. -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&display=swap">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3/dist/umd/supabase.js"></script>
   <style>
+    /* =====================================================================
+       DESIGN TOKENS
+       The map is the illustration; the chrome is the printed label wrapped
+       around it. Dense surfaces (list, form, filters) are TWO-INK: one dark
+       ink and one accent on aged paper. Color beyond those two appears only
+       at glyph scale (<=28px) and on the map itself.
+
+       NO COLOR CARRIES TEXT except --ink, --ink-2, --navy, --paper and
+       --paper-warm. Category inks are glyph/fill/rule only -- see the
+       CATEGORY_COLORS comment in the script for why (11 inks cannot all
+       clear 4.5:1 and still hold a value ladder).
+       ===================================================================== */
     :root {
       --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
-    }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      overflow: hidden;
-      height: 100vh;
+
+      /* ---- Paper & ink (fixed) ---------------------------------------- */
+      --paper:        #F2EBDD;   /* oat ground                              */
+      --paper-raised: #FAF5EA;   /* one step up: pressed rows, chips, fields */
+      --paper-warm:   #F0D9C8;   /* reversed secondary text (4.54:1 on deep) */
+      --navy:         #12293F;   /* the frame, the cold north -- 12.51:1     */
+      --ink:          #1A1A18;   /* body text -- 14.69:1 on --paper          */
+      --ink-2:        #5A564C;   /* metadata + EVERY category label -- 6.17:1 */
+      --hair:         #D8CEBA;   /* 1px rules, dashed borders               */
+
+      /* ---- Per-city accent (rewritten by applyCityPalette()) -----------
+         --figure       carries NAVY type, or sits against navy. Clears
+                        4.5:1 on --navy in all five cities (4.58 LA ..
+                        6.63 Malmo). NEVER text on paper (2.46:1).
+         --figure-deep  carries PAPER type. Clears 4.5:1 on --paper in all
+                        five cities (4.79 Stockholm .. 5.20 Reykjavik).
+         Neither may be nudged without re-running BOTH checks: Reykjavik's
+         --figure clears AA on navy by only 0.14.                          */
+      --figure:      #EE7434;
+      --figure-deep: #A8400C;
+
+      /* ---- 4px spacing scale ------------------------------------------ */
+      --s1: 4px;  --s2: 8px;   --s3: 12px;  --s4: 16px;
+      --s6: 24px; --s8: 32px;  --s12: 48px;
+
+      /* ---- The grid spine ----------------------------------------------
+         28px glyph | 1fr content | action. The 28px glyph column is the
+         app's alignment spine: row glyphs, the sheet header's chevron,
+         form labels and modal headers all start on it. Content therefore
+         always begins at 16 + 28 + 12 = 56px.                             */
+      --col-glyph:  28px;
+      --col-action: 28px;   /* ONE control. The row's two-button cluster
+                               sizes naturally (2x28 + 4 gap) so touch
+                               targets are never shrunk to fit the token. */
+      --gap:    12px;
+      --gutter: 16px;
+
+      --font-ui:     'Archivo', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-script: 'Grand Hotel', Georgia, serif;
     }
 
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font-ui);
+      background: var(--paper);
+      color: var(--ink);
+      overflow: hidden;
+      height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* The condensed display voice. One family, one axis -- never a second
+       decorative typeface. */
+    .caps {
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    /* Line-heights are set in PX, never unitless, so the 4px baseline
+       survives: 15 x 1.25 = 18.75 -> 20; 12 x 1.35 = 16.2 -> 16;
+       16 x 1.4 = 22.4 -> 24. */
+
+    /* Banner strip -- ref 2/ref 8's solid type band. Full-bleed, flat,
+       zero radius. showError()/hideError()'s source-tag contract is
+       untouched; `.info` is the success/info sibling. */
     #error {
-      background: #F5E6DD;
-      border-left: 4px solid #C97850;
-      color: #8B4513;
-      padding: 1rem;
-      margin: 1rem 1rem 0 1rem;
+      background: var(--figure-deep);
+      color: var(--paper);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-weight: 700;
+      font-size: 13px;
+      line-height: 20px;
+      letter-spacing: 0.06em;
+      padding: 12px var(--gutter);
       display: none;
       position: fixed;
       top: 0;
@@ -33,122 +117,132 @@
     }
 
     #error.show { display: block; }
+    #error.info { background: var(--navy); color: var(--paper); }
 
-    #floatingAddBtn {
+    /* ---- The seal: ref 1's luggage label. ONE seal, ONE place. --------- */
+    #seal {
       position: fixed;
-      top: 1rem;
-      right: 1rem;
-      background: #E8E6DD;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 50px;
-      height: 50px;
+      top: var(--s4);
+      left: var(--s4);
+      width: 64px;
+      height: 64px;
       border-radius: 50%;
-      font-size: 1.75rem;
-      line-height: 0;
-      cursor: pointer;
+      background: var(--navy);
+      color: var(--paper);
+      /* a 1px paper ring inset 4px */
+      box-shadow: inset 0 0 0 4px var(--navy), inset 0 0 0 5px var(--paper);
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
-      font-weight: bold;
+      /* 8px inset so the wordmark is never flush against its own ring. */
+      padding: var(--s2);
+      font-family: var(--font-script);
+      /* The wordmark's type-scale size is 26px; inside a 64px seal with a
+         5px ring and an 8px inset the usable width is ~48px, so this
+         instance is optically scaled to fit rather than overflowing. */
+      font-size: 17px;
+      line-height: 20px;
+      z-index: 1200;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    /* Floating controls stay circular -- the badge motif is on-brief and
+       they are already thumb-sized. Navy field, figure glyph, a 1px paper
+       ring so they read as seals. The shadow is a print-registration
+       offset, not a blur. */
+    #floatingAddBtn,
+    #accountBtn {
+      position: fixed;
+      top: var(--s4);
+      background: var(--navy);
+      border: none;
+      color: var(--figure);
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
       padding: 0;
       z-index: 2000;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      box-shadow: inset 0 0 0 3px var(--navy), inset 0 0 0 4px var(--paper),
+                  0 1px 0 rgba(0,0,0,0.25);
     }
 
-    #floatingAddBtn:active {
-      background: #D1CFBF;
-      border-color: #D1CFBF;
-      transform: scale(0.95);
-    }
-
-    #floatingAddBtn.active {
-      background: transparent;
-      border-color: #E8E6DD;
-      color: #6B6A5F;
-      box-shadow: none;
+    #floatingAddBtn {
+      right: var(--s4);
+      display: flex;
     }
 
     #accountBtn {
-      position: fixed;
-      top: 1rem;
-      right: 4.5rem;
-      background: #E8E6DD;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      font-size: 1.25rem;
-      cursor: pointer;
+      right: 74px;
       display: none;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      padding: 0;
-      z-index: 2000;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
     }
 
-    #accountBtn.show {
-      display: flex;
-    }
+    #accountBtn.show { display: flex; }
 
+    #floatingAddBtn:active,
     #accountBtn:active {
-      background: #D1CFBF;
-      border-color: #D1CFBF;
-      transform: scale(0.95);
+      background: #1B3A57;
     }
 
+    /* Open state INVERTS rather than going transparent. */
+    #floatingAddBtn.active,
     #accountBtn.active {
-      background: #A8C5DD;
-      border-color: #A8C5DD;
-      color: white;
+      background: var(--figure);
+      color: var(--navy);
+      box-shadow: inset 0 0 0 3px var(--figure), inset 0 0 0 4px var(--paper),
+                  0 1px 0 rgba(0,0,0,0.25);
     }
 
     #accountDropdown {
       position: fixed;
-      top: 4.5rem;
-      right: 4.5rem;
-      background: white;
-      border: 2px solid #E8E6DD;
-      border-radius: 0.5rem;
-      padding: 1rem;
+      top: 74px;
+      right: 74px;
+      background: var(--paper);
+      border: 2px solid var(--navy);
+      border-radius: 2px;
+      padding: var(--s4);
       z-index: 2000;
       display: none;
       flex-direction: column;
-      gap: 0.75rem;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      gap: var(--s3);
       min-width: 200px;
     }
 
-    #accountDropdown.show {
-      display: flex;
-    }
+    #accountDropdown.show { display: flex; }
 
     #accountDropdown .user-email {
-      font-size: 0.875rem;
-      color: #6B6A5F;
-      padding-bottom: 0.5rem;
-      border-bottom: 1px solid #E8E6DD;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink-2);
+      /* Symmetric inset: this div paints its own bottom rule, so the text
+         gets clearance on every side rather than only below. */
+      padding: var(--s2) 0 var(--s3) 0;
+      border-bottom: 1px solid var(--hair);
       word-break: break-all;
     }
 
     #accountDropdown button {
-      background: #F5E6DD;
-      color: #C97850;
-      border: none;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.375rem;
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--hair);
+      padding: var(--s2) var(--s3);
+      border-radius: 2px;
       cursor: pointer;
-      font-size: 0.875rem;
-      font-weight: 500;
-      transition: all 0.2s;
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 14px;
+      line-height: 20px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
     }
 
     #accountDropdown button:hover {
-      background: #F0DAD0;
+      background: var(--paper-raised);
     }
 
     #mainContent {
@@ -158,7 +252,10 @@
       right: 0;
       bottom: 300px;
       overflow: hidden;
-      transition: bottom 0.3s ease;
+      /* `bottom` is a layout property and is deliberately NOT transitioned:
+         animating it would relayout (and re-tile) the Leaflet canvas every
+         frame. It snaps, and invalidateSize() runs once after the sheet's
+         transform settles. */
     }
 
     #mapContainer {
@@ -173,9 +270,9 @@
 
     #controls {
       position: relative;
-      padding: 5rem 1rem 1rem 1rem;
-      border-bottom: 1px solid #E8E6DD;
-      background: #FAFAF8;
+      padding: 80px var(--gutter) var(--s6) 56px;   /* 56px left = the spine */
+      border-bottom: 2px solid var(--navy);
+      background: var(--paper);
       display: none;
       z-index: 1500;
     }
@@ -183,99 +280,155 @@
     #controls.show {
       display: block;
     }
-    
+
     #addForm {
       display: none;
     }
 
     #addForm.show { display: block; }
 
+    /* Underline fields, not boxes -- a printed form, not a web form.
+       16px is a hard floor: anything smaller makes iOS zoom on focus. */
     #addForm input, #addForm select, #addForm textarea {
       width: 100%;
-      padding: 0.625rem 0.75rem;
-      border: 1px solid #D1CFBF;
-      border-radius: 0.375rem;
-      margin-bottom: 0.75rem;
-      font-size: 1rem;
-      background: white;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      padding: 0 0 var(--s1) 0;
+      border: none;
+      border-bottom: 1px solid var(--hair);
+      border-radius: 0;
+      margin-bottom: var(--s6);
+      font-family: var(--font-ui);
+      font-size: 16px;
+      line-height: 24px;
+      color: var(--ink);
+      background: transparent;
+      transition: border-color 0.15s ease;
     }
 
+    #addForm textarea { resize: vertical; }
+
+    #addForm input::placeholder, #addForm textarea::placeholder {
+      color: var(--ink-2);
+    }
+
+    /* Focus is a 2px rule, never a glow. */
     #addForm input:focus, #addForm select:focus, #addForm textarea:focus {
       outline: none;
-      border-color: #A8C5DD;
-      box-shadow: 0 0 0 3px rgba(168, 197, 221, 0.35);
+      border-bottom: 2px solid var(--figure-deep);
+      padding-bottom: 3px;
     }
 
-    #addForm button {
+    /* The hero action: --figure field carrying a NAVY label (>=4.58:1 in
+       every city). White on it would be 3.17:1 and fail. */
+    #addForm button#submitBtn {
       width: 100%;
-      background: #A8C5DD;
-      color: white;
+      background: var(--figure);
+      color: var(--navy);
       border: none;
-      padding: 0.875rem;
-      border-radius: 0.5rem;
-      font-size: 1rem;
-      font-weight: 600;
+      padding: var(--s3);
+      border-radius: 2px;
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 14px;
+      line-height: 20px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
       cursor: pointer;
-      margin-top: 0.25rem;
+      margin-top: var(--s1);
     }
 
-    #addForm button:active {
-      background: #8FB2D2;
-    }
+    #addForm button#submitBtn:active { background: var(--figure-deep); color: var(--paper); }
+    #addForm button#submitBtn:disabled { opacity: 0.6; cursor: default; }
 
-    /* City is context for the fields below, not a field to fill in --
-       keep it visually lighter than the real inputs. */
     #addForm .field-group {
-      margin-bottom: 0.9rem;
+      margin-bottom: var(--s6);
     }
 
     #addForm .field-group select {
       margin-bottom: 0;
     }
 
+    /* 11px, not the type scale's 10px: 10px caps are below the functional-text
+       floor for a label someone has to READ and act on. The category label on
+       a row (.row-meta) stays at 10px -- it is secondary metadata beside a
+       glyph that already carries the meaning, not a control's name. */
     #addForm .field-label {
       display: block;
-      font-size: 0.75rem;
-      font-weight: 600;
+      font-stretch: 75%;
+      font-size: 11px;
+      line-height: 16px;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #6B6A5F;
-      margin-bottom: 0.3rem;
+      letter-spacing: 0.12em;
+      color: var(--ink-2);
+      margin-bottom: var(--s1);
     }
 
     /* One-tap confirmation for an auto-detected new city -- never a blocking
        dialog, always dismissable, and dismissing it just falls back to
-       today's manual cityInput select (see userOverrodeCity in the script). */
+       today's manual cityInput select (see userOverrodeCity in the script).
+       Reads as a torn-off stub, which is what it is. */
+    /* 16px inset, not 12px: this panel carries its own dashed border, so its
+       text would otherwise sit close to an edge it has to be read against. */
     .new-city-confirm {
-      background: #FBF3EE;
-      border: 1px solid #E8B84E;
-      border-radius: 0.5rem;
-      padding: 0.7rem 0.9rem;
-      margin-bottom: 0.9rem;
+      background: var(--paper-raised);
+      border: 1px dashed var(--figure-deep);
+      border-radius: 2px;
+      padding: var(--s4);
+      margin-bottom: var(--s6);
+    }
+
+    .new-city-confirm .eyebrow {
+      display: block;
+      font-stretch: 75%;
+      font-size: 11px;
+      line-height: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--figure-deep);
+      margin-bottom: var(--s1);
     }
 
     .new-city-confirm p {
-      margin: 0 0 0.6rem 0;
-      font-size: 0.85rem;
-      color: #333;
+      margin: 0 0 var(--s3) 0;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink);
     }
 
+    /* One primary, the rest hairline secondaries -- never three equals. */
     .new-city-confirm button {
-      padding: 0.45rem 0.9rem;
-      font-size: 0.85rem;
-      margin-right: 0.5rem;
+      padding: var(--s2) var(--s3);
+      margin: 0 var(--s2) var(--s1) 0;
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+      background: var(--figure);
+      color: var(--navy);
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 12px;
+      line-height: 16px;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+    }
+
+    .new-city-confirm button.secondary {
+      background: transparent;
+      color: var(--ink);
+      border: 1px solid var(--hair);
     }
 
     /* Shown under categoryInput only when a shape category (district/street)
        is selected -- see isShapeCategory() in the script. */
     .mode-toggle-hint {
       display: block;
-      font-size: 0.75rem;
-      color: #6B6A5F;
-      margin-top: 0.55rem;
-      text-align: center;
-      line-height: 1.3;
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink-2);
+      margin: calc(var(--s6) * -1 + var(--s2)) 0 var(--s6) 0;
     }
 
     #addressInputWrapper {
@@ -287,15 +440,14 @@
       top: 100%;
       left: 0;
       right: 0;
-      background: white;
-      border: 1px solid #D1CFBF;
+      background: var(--paper-raised);
+      border: 1px solid var(--navy);
       border-top: none;
-      border-radius: 0 0 0.375rem 0.375rem;
+      border-radius: 0 0 2px 2px;
       max-height: 300px;
       overflow-y: auto;
       z-index: 1000;
       display: none;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
 
     #addressAutocomplete.show {
@@ -303,14 +455,16 @@
     }
 
     .autocomplete-item {
-      padding: 0.75rem;
+      padding: var(--s3);
       cursor: pointer;
-      border-bottom: 1px solid #F5F4EF;
-      font-size: 0.875rem;
+      border-bottom: 1px solid var(--hair);
+      font-size: 12px;
+      line-height: 16px;
+      color: var(--ink);
     }
 
     .autocomplete-item:hover {
-      background: #F5F4EF;
+      background: var(--paper);
     }
 
     .autocomplete-item:last-child {
@@ -318,10 +472,11 @@
     }
 
     .autocomplete-loading {
-      padding: 0.75rem;
+      padding: var(--s3);
       text-align: center;
-      color: #6B6A5F;
-      font-size: 0.875rem;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 16px;
       font-style: italic;
     }
     
@@ -330,12 +485,11 @@
       bottom: 300px;
       left: 0;
       right: 0;
-      background: white;
-      border-top: 1px solid #E8E6DD;
-      box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      background: var(--paper);
+      border-top: 1px solid var(--hair);
       z-index: 999;
       transform: translateY(calc(100% + 300px));
-      transition: transform 0.3s ease, bottom 0.3s ease;
+      transition: transform 0.3s ease;   /* `bottom` is layout -- not animated */
       max-height: 40vh;
       overflow-y: auto;
     }
@@ -353,58 +507,106 @@
       transform: translateY(0);
     }
 
+    /* Categories are a wrapping BADGE GRID (multi-select). Cities are a flush
+       SEGMENTED CONTROL (single-select, matching setActiveCity). They used to
+       look identical, which miscommunicated the interaction model. */
     #filters {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
-      padding: 1rem;
+      gap: var(--s2);
+      padding: var(--s4) var(--gutter);
     }
 
+    /* The one ornamented divider in the app: a rope/braid hairline, used
+       exactly once. Ornament that appears once reads as craft; repeated, as
+       wallpaper. (ref 7) */
     #cityFilters {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
-      padding: 1rem 1rem 0 1rem;
-      border-bottom: 1px solid #F5F4EF;
-      padding-bottom: 1rem;
+      padding: var(--s4) var(--gutter) var(--s4) var(--gutter);
+      border-bottom: 4px solid transparent;
+      border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='4'%3E%3Cpath d='M0 2 Q2 0 4 2 T8 2 T12 2 T16 2' fill='none' stroke='%23D8CEBA' stroke-width='1.5'/%3E%3C/svg%3E") 0 0 4 0 repeat;
     }
 
     .city-btn {
-      padding: 0.5rem 0.75rem;
-      border: 1px solid #D1CFBF;
-      border-radius: 0.375rem;
-      font-size: 0.875rem;
-      font-weight: 500;
+      padding: var(--s2) var(--s3);
+      border: 1px solid var(--hair);
+      border-right-width: 0;
+      border-radius: 0;
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 12px;
+      line-height: 16px;
+      letter-spacing: 0.06em;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
-      background: white;
-      color: #6B6A5F;
+      background: var(--paper-raised);
+      color: var(--ink);
     }
+
+    .city-btn:first-child { border-radius: 3px 0 0 3px; }
+    /* "All cities" is a different KIND of choice -- past a 2px gap. */
+    .city-btn:last-child {
+      border-radius: 0 3px 3px 0;
+      border-right-width: 1px;
+      margin-left: 2px;
+      border-left-width: 1px;
+    }
+    .city-btn:nth-last-child(2) { border-right-width: 1px; border-radius: 0 3px 3px 0; }
 
     .city-btn.active {
-      background: #A8C5DD;
-      border-color: #A8C5DD;
-      color: white;
+      background: var(--navy);
+      border-color: var(--navy);
+      color: var(--paper);
     }
 
+    /* Chips carry INK text on paper, never white-on-category-color (which was
+       1.80:1 on the old palette). Only the RULE changes between states, so
+       contrast is constant and all 11 stay AA regardless of their ink.
+       No italics, no opacity-as-state, no !important. */
     .filter-btn {
-      padding: 0.5rem 0.75rem;
-      border: 1px solid transparent;
-      border-radius: 0.375rem;
-      font-size: 0.875rem;
-      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--s2);
+      padding: var(--s2) var(--s3);
+      background: var(--paper-raised);
+      color: var(--ink);
+      border: 1px solid var(--hair);
+      border-bottom: 2px solid transparent;
+      border-radius: 3px;
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 12px;
+      line-height: 16px;
+      letter-spacing: 0.06em;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
-      font-style: normal;
+      transition: border-color 0.15s ease;
     }
 
-    .filter-btn.inactive {
-      background: white !important;
-      color: #B8B5AC !important;
-      font-style: italic;
-      opacity: 0.8;
-      border: 1px solid #D1CFBF !important;
+    /* The category ink arrives as a custom property (--chip-ink) rather than
+       an inline `color`, so the inactive rule below can override it without
+       needing !important. */
+    .filter-btn .chip-glyph {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+      display: block;
+      color: var(--chip-ink, var(--ink-2));
     }
+
+    /* ACTIVE = a 2px solid rule in the category ink. */
+    .filter-btn { border-bottom-color: var(--chip-ink, transparent); }
+
+    /* INACTIVE = dashed hairline, quiet glyph, no rule. */
+    .filter-btn.inactive {
+      border: 1px dashed var(--hair);
+      color: var(--ink-2);
+    }
+
+    .filter-btn.inactive .chip-glyph { color: var(--ink-2); }
     
     #map {
       position: absolute;
@@ -416,33 +618,39 @@
       height: 100%;
     }
 
+    /* Collapse is a TRANSFORM, not an animated height. The sheet keeps its
+       300px box and slides down by (300 - 60) = 240px, which leaves exactly
+       the 60px header band (a 56px content box plus its two 2px rules) on
+       screen. Animating height/padding/margin thrashes layout on every
+       frame; translateY is composited. */
     #locations {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
       height: 300px;
-      background: #FAFAF8;
-      border-top: 1px solid #E8E6DD;
-      padding: 1rem 1rem 0 1rem;
+      background: var(--paper);
       z-index: 1000;
-      transition: height 0.3s ease, padding 0.3s ease;
-      box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
+      transform: translateY(0);
+      transition: transform 0.3s ease;
+      will-change: transform;
       display: flex;
       flex-direction: column;
+      /* NO horizontal padding: rows carry their own 16px gutter so the
+         highlighted row can bleed edge-to-edge while its content stays on
+         the grid spine. */
+      padding: 0;
     }
 
     #locations.collapsed {
-      height: 60px !important;
-      padding: 0.75rem 1rem;
-      overflow: hidden;
-      bottom: env(safe-area-inset-bottom, 0px);
+      /* ...minus the safe area, so the bar clears the home indicator the way
+         the old `bottom: env(...)` did. */
+      transform: translateY(calc(240px - env(safe-area-inset-bottom, 0px)));
     }
 
     #locationsList {
       overflow-y: auto;
       flex: 1;
-      margin-top: 0.5rem;
       position: relative;
       mask-image: none;
       -webkit-mask-image: none;
@@ -464,180 +672,329 @@
       display: none;
     }
 
+    /* TIER 1a -- IDENTITY. A persistent, per-city --figure field carrying
+       navy type. This is where the "one rigid system re-inked per poster"
+       idea (ref 8) becomes visible in daily use. The 2px navy rule gives
+       the field a DEFINED edge: --figure vs --paper is only 1.89-2.73:1,
+       below the 3:1 floor every other non-text boundary here clears, so
+       the edge must not be load-bearing. Navy is 12.51:1 on paper and
+       4.58-6.63:1 on every city's figure. */
     #locationsHeader {
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      gap: 0.5rem;
+      gap: var(--gap);
       flex-shrink: 0;
+      /* REAL vertical inset, not height-driven flex centring: this band
+         paints a background AND a rule on both edges, so its text needs
+         measured clearance from them rather than whatever centring happens
+         to leave. 12 + 32 + 12 = 56px content box, + the two 2px rules =
+         a 60px bar. */
+      min-height: 56px;
+      padding: var(--s3) var(--gutter);
+      background: var(--figure);
+      color: var(--navy);
+      /* BOTH edges of the field get a defined rule, not just the bottom:
+         on a phone the header's top edge meets the map tiles, which is the
+         more prominent of the two boundaries. */
+      border-top: 2px solid var(--navy);
+      border-bottom: 2px solid var(--navy);
+    }
+
+    @media (min-width: 900px) {
+      #locationsHeader { border-top: none; }
     }
 
     #locationsHeader h2 {
-      font-size: 1.125rem;
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 15px;
+      line-height: 20px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
       margin: 0;
       flex: 1;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
-    #collapseBtn {
-      background: transparent;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 32px;
-      height: 32px;
-      font-size: 1rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s;
-      border-radius: 0.375rem;
-    }
-
-    #collapseBtn:active {
-      background: #E8E6DD;
-    }
-
-    #collapseBtn.collapsed {
-      transform: rotate(-180deg);
-    }
-
-    #toggleFiltersBtn {
-      background: transparent;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 36px;
-      height: 36px;
-      border-radius: 0.375rem;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.2s;
-      flex-shrink: 0;
-    }
-
-    #toggleFiltersBtn:active {
-      background: #E8E6DD;
-    }
-
-    #toggleFiltersBtn.active {
-      background: #E8E6DD;
-      color: #6B6A5F;
-    }
-
+    #collapseBtn,
+    #toggleFiltersBtn,
     #centerMeBtn {
       background: transparent;
-      border: 2px solid #E8E6DD;
-      color: #6B6A5F;
-      width: 36px;
-      height: 36px;
-      border-radius: 0.375rem;
+      border: none;
+      color: var(--navy);
+      /* 32px square: sits inside the header's 12px inset without pushing the
+         bar taller, and stays a usable tap target. */
+      width: 32px;
+      height: 32px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
       flex-shrink: 0;
+      padding: 0;
+      transition: opacity 0.15s ease;
     }
 
-    #centerMeBtn:active {
-      background: #E8E6DD;
-    }
+    #collapseBtn { font-size: 14px; line-height: 1; transition: transform 0.3s ease; }
+    #collapseBtn.collapsed { transform: rotate(-180deg); }
 
-    #centerMeBtn.loading {
-      background: transparent;
-      opacity: 0.5;
-    }
-    
+    #collapseBtn:active,
+    #toggleFiltersBtn:active,
+    #centerMeBtn:active { opacity: 0.55; }
+
+    #toggleFiltersBtn.active { opacity: 0.55; }
+    #centerMeBtn.loading { opacity: 0.4; }
+
+    /* =====================================================================
+       LEDGER ROWS
+       Flush 56px rows on paper, 1px rules between, no gap/shadow/radius.
+       The old card burned ~40% of the 300px sheet on chrome; this shows
+       ~5.3 rows where it showed ~3.5, and reads MORE ordered, not less.
+       Grid: 28px glyph | 1fr content | action cluster.
+       ===================================================================== */
     .location-card {
-      background: white;
-      padding: 0.75rem;
-      margin-bottom: 0.5rem;
-      border-radius: 0.5rem;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-      border-left: 4px solid;
-      transition: all 0.15s ease;
+      display: grid;
+      grid-template-columns: var(--col-glyph) 1fr auto;
+      column-gap: var(--gap);
+      align-items: center;
+      min-height: 56px;
+      padding: var(--s2) var(--gutter);
+      background: var(--paper);
+      border-bottom: 1px solid var(--hair);
+      transition: background 0.12s ease;
       -webkit-tap-highlight-color: transparent;
       -webkit-touch-callout: none;
       -webkit-user-select: none;
       user-select: none;
     }
 
-    .location-card.highlighted {
-      box-shadow: 0 0 0 2px #A8C5DD;
-    }
-
-    .locations-empty {
-      color: #6B6A5F;
-      font-size: 0.875rem;
-      font-style: italic;
-      padding: 1rem 0.25rem;
-    }
-
+    /* Press state is a background change only. `scale(0.98)` is deliberately
+       GONE: scaling a flush ruled row looks broken where scaling a floating
+       card looked fine. */
     .location-card:active,
     .location-card.active {
-      background: #F5F4EF;
-      transform: scale(0.98);
-      box-shadow: 0 1px 1px rgba(0,0,0,0.03);
+      background: var(--paper-raised);
     }
 
+    /* The badge follows `color`, so the reversed block below can flip the
+       whole thing to paper without a re-render. The inline style sets only
+       the custom property, so these rules still cascade normally. */
+    .row-badge {
+      width: var(--col-glyph);
+      height: var(--col-glyph);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--row-ink, var(--ink-2));
+      --badge-field: var(--paper);
+    }
+
+    .row-badge svg { display: block; }
+
+    .row-main { min-width: 0; }
+
     .location-card h3 {
-      font-size: 1rem;
-      margin-bottom: 0.25rem;
+      font-size: 15px;
+      line-height: 20px;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    
-    .location-card p {
-      font-size: 0.75rem;
-      color: #6B6A5F;
-      margin-bottom: 0.25rem;
+
+    /* Category labels are ALWAYS --ink-2, never the category ink: 11 inks
+       cannot all clear 4.5:1 as 10px text and still hold a value ladder.
+       The glyph carries the ink; the word stays quiet. */
+    .location-card .row-meta {
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 10px;
+      line-height: 12px;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: var(--ink-2);
+      margin-top: var(--s1);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    
+
+    /* TIER 1b -- FOCUS. The reversed data block, modelled on ref 7's
+       mileage table (place names + numbers reversed out of a solid
+       vermilion field). Full-bleed: because #locations has no horizontal
+       padding and the gutter lives INSIDE the row, the field already
+       spans edge to edge while the content stays on the spine. This is the
+       only element permitted to break the 16px gutter. */
+    .location-card.highlighted {
+      background: var(--figure-deep);
+      border-bottom-color: var(--figure-deep);
+    }
+
+    .location-card.highlighted h3 { color: var(--paper); }          /* 5.20:1 */
+    .location-card.highlighted .row-meta { color: var(--paper-warm); } /* 4.54:1 */
+    .location-card.highlighted .row-badge { color: var(--paper); --badge-field: transparent; }
+    .location-card.highlighted .visit-btn,
+    .location-card.highlighted .delete-btn { color: var(--paper); border-color: var(--paper); }
+    .location-card.highlighted .visit-btn.visited { background: var(--paper); color: var(--figure-deep); }
+
+    .locations-empty {
+      color: var(--ink-2);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 12px;
+      line-height: 16px;
+      letter-spacing: 0.06em;
+      font-weight: 700;
+      text-align: center;
+      padding: var(--s12) var(--gutter);
+      max-width: 62ch;
+      margin: 0 auto;
+    }
+
+    .locations-empty svg { display: block; margin: 0 auto var(--s3); color: var(--hair); }
+
+    /* Two 28px controls, 4px apart -- the action cluster sizes naturally
+       rather than being crushed into a 28px token. Touch targets are never
+       shrunk to fit the grid. */
     .location-actions {
       display: flex;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
+      gap: var(--s1);
+      align-items: center;
     }
-    
+
     .location-actions button {
-      padding: 0.25rem 0.5rem;
+      width: var(--col-action);
+      height: var(--col-action);
+      padding: 0;
       border: none;
-      border-radius: 0.25rem;
-      font-size: 0.75rem;
+      background: transparent;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      line-height: 1;
     }
-    
+
     .visit-btn {
-      background: #E8E6DD;
-      color: #6B6A5F;
+      color: var(--ink-2);
+      border: 1px solid var(--hair);
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      margin: 0 var(--s1);
     }
 
     .visit-btn.visited {
-      background: #A8B89E;
-      color: white;
-    }
-    
-    .delete-btn {
-      background: #F5E6DD;
-      color: #C97850;
+      background: var(--figure);
+      border-color: var(--figure);
+      color: var(--navy);
     }
 
+    /* Quiet until the row is active -- a fast scroll must never show a
+       column of red X's. */
+    .delete-btn {
+      color: var(--ink-2);
+    }
+
+    .location-card.active .delete-btn { color: var(--figure-deep); }
+
     @keyframes markerPulse {
-      0% {
-        transform: scale(1);
-        box-shadow: 0 0 0 0 rgba(168, 197, 221, 0.7);
-      }
-      50% {
-        transform: scale(1.15);
-        box-shadow: 0 0 0 8px rgba(168, 197, 221, 0);
-      }
-      100% {
-        transform: scale(1);
-        box-shadow: 0 0 0 0 rgba(168, 197, 221, 0);
-      }
+      0%   { transform: scale(1);    opacity: 1; }
+      50%  { transform: scale(1.12); opacity: 0.88; }
+      100% { transform: scale(1);    opacity: 1; }
     }
 
     .highlighted-marker {
       animation: markerPulse 1.5s ease-in-out infinite;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .highlighted-marker { animation: none; }
+    }
+
+    /* =====================================================================
+       BASEMAP RE-TONE
+       Scoped to .leaflet-tile-pane ONLY -- never .leaflet-pane, which would
+       sepia the markers and popups too.
+       ===================================================================== */
+    .leaflet-tile-pane {
+      filter: sepia(0.3) saturate(0.75) contrast(0.96) hue-rotate(-6deg);
+    }
+
+    /* Popups: paper, hard edge, no shadow. */
+    .leaflet-popup-content-wrapper {
+      background: var(--paper);
+      color: var(--ink);
+      border: 1px solid var(--ink);
+      border-radius: 2px;
+      box-shadow: none;
+      /* Inset lives on the painted box itself rather than entirely on the
+         child's margin, so the text is never flush against the border. */
+      padding: var(--s1);
+    }
+
+    .leaflet-popup-tip {
+      background: var(--paper);
+      border: 1px solid var(--ink);
+      box-shadow: none;
+    }
+
+    .leaflet-popup-content { margin: var(--s2); font-family: var(--font-ui); }
+    .leaflet-popup-close-button { color: var(--ink-2) !important; }
+
+    .popup-head {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      margin-bottom: var(--s1);
+    }
+
+    .popup-title {
+      font-size: 15px;
+      line-height: 20px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    /* buildPopupHtml() used to print the category as plain colorless text,
+       which made the popup the ONE surface communicating category by
+       nothing at all. It now carries the glyph, like every other surface. */
+    .popup-cat {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 10px;
+      line-height: 12px;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: var(--ink-2);
+      margin-bottom: var(--s2);
+    }
+
+    .popup-cat svg { width: 20px; height: 20px; display: block; flex-shrink: 0; }
+    .popup-addr  { font-size: 12px; line-height: 16px; color: var(--ink-2); }
+    .popup-notes { font-size: 12px; line-height: 16px; color: var(--ink-2); font-style: italic; margin-top: var(--s2); }
+
+    /* --navy, not --figure-deep: on a restaurant popup the deep figure would
+       sit ~40px from a restaurant-ink glyph they collide with in all five
+       cities. Navy is 2.71:1 away in value from every category ink. */
+    .popup-visited {
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 10px;
+      line-height: 12px;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: var(--navy);
+      margin-top: var(--s2);
     }
 
     /* Auth Modal */
@@ -648,11 +1005,13 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.5);
+      /* A NAVY-tinted scrim, not black. Tinted scrims are half of why
+         vintage print feels coherent. */
+      background: rgba(18, 41, 63, 0.72);
       z-index: 3000;
       align-items: center;
       justify-content: center;
-      padding: 1rem;
+      padding: var(--s4);
     }
 
     #authModal.show {
@@ -660,68 +1019,182 @@
     }
 
     #authModalContent {
-      background: white;
-      padding: 2rem;
-      border-radius: 0.5rem;
+      background: var(--paper);
+      border: 2px solid var(--navy);
+      border-radius: 2px;
       max-width: 400px;
       width: 100%;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+      box-shadow: none;
+      overflow: hidden;
+    }
+
+    /* The modal header band, with the seal on the spine. */
+    #authModalHead {
+      display: flex;
+      align-items: center;
+      gap: var(--gap);
+      background: var(--navy);
+      color: var(--paper);
+      padding: var(--s3) var(--gutter);
+    }
+
+    #authModalHead .seal-sm {
+      width: var(--col-glyph);
+      height: var(--col-glyph);
+      border-radius: 50%;
+      background: var(--navy);
+      box-shadow: inset 0 0 0 2px var(--navy), inset 0 0 0 3px var(--paper);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-script);
+      font-size: 13px;
+      line-height: 1;
+      flex-shrink: 0;
     }
 
     #authModalContent h2 {
-      margin: 0 0 1rem 0;
-      font-size: 1.5rem;
+      margin: 0;
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 15px;
+      line-height: 20px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
     }
 
+    #authModalBody { padding: var(--s8) var(--gutter); }
+
     #authModalContent p {
-      margin: 0 0 1.5rem 0;
-      color: #6B6A5F;
-      font-size: 0.875rem;
+      margin: 0 0 var(--s6) 0;
+      color: var(--ink-2);
+      font-size: 12px;
+      line-height: 16px;
     }
 
     #authModalContent input {
       width: 100%;
-      padding: 0.75rem;
-      border: 1px solid #D1CFBF;
-      border-radius: 0.375rem;
-      margin-bottom: 0.75rem;
-      font-size: 1rem;
+      padding: 0 0 var(--s1) 0;
+      border: none;
+      border-bottom: 1px solid var(--hair);
+      border-radius: 0;
+      margin-bottom: var(--s6);
+      font-family: var(--font-ui);
+      font-size: 16px;
+      line-height: 24px;
+      background: transparent;
+      color: var(--ink);
+    }
+
+    #authModalContent input:focus {
+      outline: none;
+      border-bottom: 2px solid var(--figure-deep);
+      padding-bottom: 3px;
     }
 
     #authModalContent button {
       width: 100%;
-      background: #A8C5DD;
-      color: white;
+      background: var(--figure);
+      color: var(--navy);
       border: none;
-      padding: 0.75rem;
-      border-radius: 0.375rem;
-      font-size: 1rem;
-      font-weight: 600;
+      padding: var(--s3);
+      border-radius: 2px;
+      font-family: var(--font-ui);
+      font-stretch: 75%;
+      text-transform: uppercase;
+      font-size: 14px;
+      line-height: 20px;
+      letter-spacing: 0.08em;
+      font-weight: 700;
       cursor: pointer;
-      margin-bottom: 0.5rem;
-    }
-
-    #authModalContent button:hover {
-      background: #92B3C9;
+      margin-bottom: var(--s2);
     }
 
     #authModalContent button.secondary {
       background: transparent;
-      color: #6B6A5F;
-      border: 1px solid #D1CFBF;
+      color: var(--ink);
+      border: 1px solid var(--hair);
     }
 
     #authModalContent button.secondary:hover {
-      background: #F5F4EF;
+      background: var(--paper-raised);
     }
 
     /* Auth Status Indicator - Hidden, using account button instead */
     #authStatus {
       display: none !important;
     }
+
+    /* =====================================================================
+       DESKTOP: the bottom sheet becomes a left rail. The map needs
+       map.invalidateSize() when this flips -- see the matchMedia listener
+       at the bottom of the script.
+       ===================================================================== */
+    @media (min-width: 900px) {
+      #locations {
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: auto;
+        width: 360px;
+        height: 100vh;
+        border-right: 2px solid var(--navy);
+      }
+      /* A full-height rail has nothing to collapse into, so the slide-down
+         transform and the list-hiding are both switched off here. */
+      #locations.collapsed { transform: none; }
+      #locations.collapsed #locationsList { display: block; }
+      #collapseBtn { display: none; }
+      #mainContent { left: 360px; bottom: 0 !important; }
+      /* The panel slides up from the viewport bottom once the sheet is a
+         full-height rail -- there is no bottom sheet left to sit above. */
+      #filtersPanel { left: 360px; bottom: 0; }
+      #filtersPanel.collapsed-mode { bottom: 0; }
+      #seal { left: 376px; }
+    }
   </style>
 </head>
 <body>
+  <!-- =====================================================================
+       CATEGORY GLYPHS
+       Flat FILLED silhouettes -- form by shape adjacency, no outlines
+       (ref 8's screenprint grammar). Drawn once, <use>d in markerIcon(),
+       createFilters(), the list rows AND buildPopupHtml().
+
+       These are load-bearing, not decoration. Under a Machado deuteranope
+       transform 8 of 66 token pairs fail the simple value/hue/chroma
+       predicate; 5 fail under protanopia. Most of those are low-saturation
+       pairs sitting ~177 degrees apart, which remain distinguishable on the
+       surviving blue-yellow axis even though they trip the predicate -- but
+       three genuinely collapse under deuteranopia (restaurant/attraction at
+       0.0deg, hotel/area at 0.9deg, district/shopping at 2.8deg).
+       39 of 55 category pairs (71%) still separate on luminance alone.
+       Hence the system law: CATEGORY IDENTITY IS CARRIED BY SHAPE; colour
+       is reinforcement only. Any surface showing a category shows its glyph.
+
+       district/street are the two that legitimately use stroke rather than
+       fill -- a dashed outline IS their meaning, and the dash patterns
+       mirror neighborhoodStyle() exactly ('6 4' vs '2 8').
+       ===================================================================== -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+    <symbol id="g-restaurant" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h2v7h1V2h2v7h1V2h2v8a3 3 0 0 1-2 2.83V22h-4v-9.17A3 3 0 0 1 6 10V2z"/></symbol>
+    <symbol id="g-cafe" viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h13v7a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V4z"/><path fill="currentColor" d="M17 6h2a3 3 0 0 1 0 6h-2V6z"/><path fill="currentColor" d="M2 19h16v2H2z"/></symbol>
+    <symbol id="g-bar" viewBox="0 0 24 24"><path fill="currentColor" d="M3 3h18l-8 9v7h4v2H7v-2h4v-7L3 3z"/></symbol>
+    <symbol id="g-attraction" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l3 6v11H9V8l3-6z"/><path fill="currentColor" d="M7 20h10v2H7z"/></symbol>
+    <symbol id="g-nature" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2l4 6h-2.5l3 5H14l3.5 6h-11L10 13H7.5l3-5H8l4-6z"/><path fill="currentColor" d="M11 18h2v4h-2z"/></symbol>
+    <symbol id="g-shopping" viewBox="0 0 24 24"><path fill="currentColor" d="M12 1a4 4 0 0 0-4 4v2h2V5a2 2 0 0 1 4 0v2h2V5a4 4 0 0 0-4-4z"/><path fill="currentColor" d="M4 7h16l-1.5 15h-13L4 7z"/></symbol>
+    <symbol id="g-area" viewBox="0 0 24 24"><path fill="currentColor" d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2z"/><path fill="currentColor" d="M8.5 18l6-12h2l-6 12h-2zM13.5 18l5-10v4l-3 6h-2z"/></symbol>
+    <symbol id="g-hotel" viewBox="0 0 24 24"><path fill="currentColor" d="M2 6h3v7h9a5 5 0 0 1 5 5v3h-3v-2H5v2H2V6z"/><circle fill="currentColor" cx="8.5" cy="9.5" r="2.5"/></symbol>
+    <symbol id="g-other" viewBox="0 0 24 24"><circle fill="currentColor" cx="12" cy="12" r="5"/></symbol>
+    <symbol id="g-district" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-dasharray="6 4" d="M4 5h16v14H4z"/></symbol>
+    <symbol id="g-street" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 8" d="M3 18C7 6 17 18 21 6"/></symbol>
+    <symbol id="g-compass" viewBox="0 0 24 24"><circle fill="none" stroke="currentColor" stroke-width="2" cx="12" cy="12" r="9"/><path fill="currentColor" d="M16 8l-2.5 6L7 16.5l2.5-6L16 8z"/></symbol>
+  </defs></svg>
+
+  <!-- ONE seal, ONE place: the previously-empty top-left corner of the map
+       (ref 1's luggage label). One seal is a brand; five is a scrapbook. -->
+  <div id="seal" aria-hidden="true">Triplet</div>
+
   <div id="error">
     <p id="errorText"></p>
   </div>
@@ -734,13 +1207,18 @@
 
   <div id="authModal">
     <div id="authModalContent">
-      <h2>Login Required</h2>
-      <p>You need to log in to add, edit, or delete locations. Anyone can view locations without logging in.</p>
-      <input type="email" id="authEmailInput" placeholder="Email" autocomplete="email">
-      <input type="password" id="authPasswordInput" placeholder="Password" autocomplete="current-password">
-      <button id="loginBtn">Login</button>
-      <button id="cancelAuthBtn" class="secondary">Cancel</button>
-      <p id="authError" style="color: #C97850; margin-top: 1rem; display: none;"></p>
+      <div id="authModalHead">
+        <span class="seal-sm">T</span>
+        <h2>Login Required</h2>
+      </div>
+      <div id="authModalBody">
+        <p>You need to log in to add, edit, or delete locations. Anyone can view locations without logging in.</p>
+        <input type="email" id="authEmailInput" placeholder="Email" autocomplete="email">
+        <input type="password" id="authPasswordInput" placeholder="Password" autocomplete="current-password">
+        <button id="loginBtn">Login</button>
+        <button id="cancelAuthBtn" class="secondary">Cancel</button>
+        <p id="authError" style="color: var(--figure-deep); margin-top: 1rem; display: none;"></p>
+      </div>
     </div>
   </div>
 
@@ -756,7 +1234,13 @@
     <button id="dropdownLogoutBtn">Logout</button>
   </div>
 
-  <button id="floatingAddBtn">+</button>
+  <!-- A stroked SVG, not a text character: `line-height: 0` on a 1.75rem "+"
+       was doing optical-centering work that breaks across platforms. -->
+  <button id="floatingAddBtn" aria-label="Add a place">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+  </button>
 
   <div id="mainContent">
     <div id="controls">
@@ -783,6 +1267,7 @@
         </div>
         <p id="shapeHint" class="mode-toggle-hint" style="display:none;">Traces this from OpenStreetMap as a map shape instead of a single pin — no address needed.</p>
         <div id="shapeCityConfirm" class="new-city-confirm" style="display:none;">
+          <span class="eyebrow">Which city?</span>
           <p id="shapeCityConfirmText"></p>
           <button type="button" id="shapeCityConfirmAddCity">Add city</button>
           <button type="button" id="shapeCityConfirmAddTo" class="secondary"></button>
@@ -795,6 +1280,7 @@
         </div>
         <input type="text" id="addressInput" placeholder="Address" required>
         <div id="newCityConfirm" class="new-city-confirm" style="display:none;">
+          <span class="eyebrow">New city?</span>
           <p id="newCityConfirmText"></p>
           <button type="button" id="newCityConfirmAdd">Add city</button>
           <button type="button" id="newCityConfirmDismiss" class="secondary">Not right</button>
@@ -851,19 +1337,81 @@
 
     let currentUser = null;
 
+    // =========================================================================
+    // CATEGORY INKS  (sourced from the WPA park-poster series: Zion
+    // rust/slate/gold/olive, Bryce plum/lavender, Yellowstone teal)
+    //
+    // These are GLYPH / FILL / RULE colours only. They are never text --
+    // every category LABEL renders in --ink-2. That is not a stylistic
+    // preference, it is forced: requiring all 11 to clear 4.5:1 on --paper
+    // caps luminance at 0.147, which collapses the value ladder that stops
+    // the palette reading as one mush. (The old palette failed exactly that
+    // way: bar/area were ~1 degree apart in hue at near-identical value.)
+    //
+    // Separation rule -- every PAIR satisfies at least one of:
+    //   (a) >= 1.4:1 in (L+0.05)                              40 pairs
+    //   (b) >= 60deg in hue, where both have S >= 0.15        13 pairs
+    //   (c) >= 0.25 in HSL saturation, where one is near-neutral  2 pairs
+    // ...and every ink is >= 3:1 against --paper so a glyph, chip dot or
+    // marker rim reads as a non-text UI component (WCAG 1.4.11).
+    // Verified: 0 failures of 55.
+    //
+    // A flat >= 1.4:1 floor for all 11 is IMPOSSIBLE, not merely awkward:
+    // pairwise 1.4 across n colours needs a 1.4^(n-1) span, the widest span
+    // available on this paper is 17.70:1, so n <= 9 -- and with the 3:1
+    // floor the span is 5.90:1, so n <= 6.
+    //
+    // Tightest margins -- do not nudge these without re-running the checks:
+    //   nature/area     hue 61.4deg   (+1.4)
+    //   area/other      value 1.403   (+0.003; ΔS 0.281 is a second channel)
+    //   area/cafe       value 1.405   (+0.005; 176deg hue is a second channel)
+    //   other/bar       ΔS 0.303      (+0.053) -- `other` cannot be greyer
+    //   cafe/restaurant value 1.440
+    //
+    // `restaurant` and --figure-deep are deliberately adjacent (they collide
+    // on all three channels in all five cities). They are kept apart in
+    // SPACE, not in colour: the highlighted row reverses its glyph to
+    // --paper, the delete control sits >=244px away across the content
+    // column, form controls never render category ink, and the popup's
+    // visited marker is --navy rather than --figure-deep.
+    // =========================================================================
     const CATEGORY_COLORS = {
-      restaurant: '#C9A855',
-      cafe: '#8B7355',
-      bar: '#9EADB8',
-      attraction: '#E8B84E',
-      nature: '#7BA862',
-      shopping: '#A889B8',
-      area: '#A8C5DD',
-      hotel: '#D4A574',
-      other: '#A8B89E',
-      district: '#6FA8A6',
-      street: '#C97850'
+      restaurant: '#AC5019',   // Bryce burnt orange   4.52:1  H  22.4  S .746
+      cafe:       '#6E4C22',   // Zion olive-brown     6.51:1  H  33.2  S .528
+      bar:        '#3D5A7A',   // McKinley blue        6.02:1  H 211.5  S .333
+      attraction: '#A68018',   // Zion gold            3.09:1  H  43.9  S .747
+      nature:     '#1E3A2B',   // Yellowstone spruce  10.44:1  H 147.9  S .318
+      shopping:   '#8A7AA8',   // Bryce lavender       3.26:1  H 260.9  S .209
+      area:       '#2B3F52',   // Zion slate           9.15:1  H 209.2  S .312
+      hotel:      '#2E2433',   // Bryce deep plum     12.50:1  H 280.0  S .172
+      other:      '#4F5450',   // near-neutral         6.52:1  (S .031)
+      district:   '#328177',   // Yellowstone teal     3.90:1  H 172.4  S .441
+      street:     '#5E2C17'    // Zion deep rust       9.58:1  H  17.7  S .607
     };
+
+    // -------------------------------------------------------------------------
+    // PER-CITY ACCENT (ref 8: one rigid type/layout system, re-inked per
+    // poster). The chrome, grid and glyphs never change; only these two
+    // tokens do. Runtime-added cities inherit the default.
+    //   figure     -> carries NAVY type. >= 4.5:1 on #12293F, all five.
+    //   figureDeep -> carries PAPER type. >= 4.5:1 on #F2EBDD, all five.
+    // -------------------------------------------------------------------------
+    const CITY_PALETTES = {
+      reykjavik:  { figure: '#EE7434', figureDeep: '#A8400C' },  // 5.08 / 5.20  glacier
+      copenhagen: { figure: '#E2705C', figureDeep: '#B23A2C' },  // 4.74 / 5.01  harbour
+      malmo:      { figure: '#E0A22E', figureDeep: '#8A5A0E' },  // 6.63 / 4.99  dusk
+      stockholm:  { figure: '#D98A2B', figureDeep: '#995610' },  // 5.39 / 4.79  ochre facades
+      la:         { figure: '#E8674F', figureDeep: '#AE3A29' }   // 4.58 / 5.15  canyon
+    };
+
+    const DEFAULT_PALETTE = CITY_PALETTES.reykjavik;
+
+    // The only writer of the accent tokens. Called from setActiveCity().
+    function applyCityPalette(cityId) {
+      const p = CITY_PALETTES[cityId] || DEFAULT_PALETTE;
+      document.documentElement.style.setProperty('--figure', p.figure);
+      document.documentElement.style.setProperty('--figure-deep', p.figureDeep);
+    }
     
     // `countrycodes` is Nominatim's HARD filter -- results outside these countries
     // are not returned at all. It is a comma-separated list, deliberately, so that
@@ -1461,6 +2009,11 @@
       if (selection !== ALL_CITIES) activeCity = selection;   // else keep last real city
       filters.city = (selection === ALL_CITIES) ? null : selection;
 
+      // Re-ink the chrome. activeCity (never ALL_CITIES) is the authoring /
+      // viewport context, so "All cities" keeps the last real city's accent
+      // rather than falling back to a neutral.
+      applyCityPalette(activeCity);
+
       noteInteraction();
 
       // The highlighted location may belong to the city we are leaving.
@@ -1931,16 +2484,17 @@
             map.removeLayer(userLocationMarker);
           }
           
-          // Create blue marker for user location
+          // "You are here" is not a category, so it deliberately carries no
+          // glyph and no category ink -- a plain navy dot with a paper rim.
           const userIcon = L.divIcon({
-            html: `<div style="background-color: #A8C5DD; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 8px rgba(168, 197, 221, 0.6);"></div>`,
+            html: `<div style="background: var(--navy); width: 16px; height: 16px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--navy), inset 0 0 0 4px var(--paper), 0 1px 0 rgba(0,0,0,0.25);"></div>`,
             className: '',
             iconSize: [16, 16],
             iconAnchor: [8, 8]
           });
-          
+
           userLocationMarker = L.marker([latitude, longitude], { icon: userIcon }).addTo(map);
-          userLocationMarker.bindPopup('<div style="text-align: center; font-weight: bold;">You are here</div>');
+          userLocationMarker.bindPopup('<div class="popup-title" style="text-align:center">You are here</div>');
           
           // Center map on user location
           focusMap([latitude, longitude], 14, { animate: true });
@@ -2014,12 +2568,93 @@
       return [loc.name, loc.address, loc.category, loc.visited].join('|');
     }
 
+    // =========================================================================
+    // GLYPHS & BADGES
+    // Badge SHAPE encodes the data state, which the list could not previously
+    // express at all:
+    //   circle             -> a `locations` pin
+    //   diamond            -> a `neighborhood_shapes` feature
+    //   circle, dashed rim -> an "(approx.)" fallback pin from
+    //                         findApproximatePoint() -- indistinguishable
+    //                         from a real pin before this.
+    // =========================================================================
+
+    // The old 24px marker was a colored DOT carrying no glyph, so it never
+    // needed interior room. 28px minus a 2px rim leaves a 24px field and an
+    // ~18px glyph -- the practical floor for telling 11 silhouettes apart
+    // over live map tiles.
+    const MARKER_SIZE    = 28;
+    const MARKER_SIZE_HI = 36;
+
+    // Below this zoom pins cluster and 11 pictograms stop being readable, so
+    // markers drop to badge SHAPE only -- which still answers the question
+    // that matters at that scale ("is that a pin or a district?").
+    const GLYPH_MIN_ZOOM = 12;
+
+    function categoryInk(category) {
+      return CATEGORY_COLORS[category] || CATEGORY_COLORS.other;
+    }
+
+    // An approximate pin records its provenance in the name suffix written by
+    // handleAddShapeSubmit(); that is the only marker of its kind on the row.
+    function markerKind(loc) {
+      if (typeof loc.name === 'string' && loc.name.indexOf('(approx.)') !== -1) return 'dashed';
+      return 'circle';
+    }
+
+    // Bare glyph, no shell -- chips, popups.
+    function glyphHtml(category, size) {
+      return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><use href="#g-${escapeAttr(category)}"/></svg>`;
+    }
+
+    // Stamped-seal badge: paper field, category-ink rim, category-ink glyph.
+    // Legible over any tile value, and readable WITHOUT the legend.
+    //
+    // Defaults are `currentColor` / `var(--badge-field)` so a ROW can flip
+    // the whole badge to paper on the reversed highlighted block just by
+    // changing its own `color` -- no re-render, and no category ink ever
+    // lands on the --figure-deep field. Markers, which live outside that
+    // cascade, pass explicit colours instead.
+    function badgeHtml(category, kind, size, opts = {}) {
+      const ink  = opts.ink  || 'currentColor';
+      const fill = opts.fill || 'var(--badge-field, #F2EBDD)';
+      const mark = opts.mark || ink;
+      const rim  = opts.rim || 2;
+      const c    = size / 2;
+      const r    = c - rim / 2;
+
+      let shell;
+      if (kind === 'diamond') {
+        const p = `${c},${rim / 2} ${size - rim / 2},${c} ${c},${size - rim / 2} ${rim / 2},${c}`;
+        shell = `<polygon points="${p}" fill="${fill}" stroke="${ink}" stroke-width="${rim}" stroke-linejoin="round"/>`;
+      } else if (kind === 'dashed') {
+        shell = `<circle cx="${c}" cy="${c}" r="${r}" fill="${fill}" stroke="${ink}" stroke-width="${rim}" stroke-dasharray="3 3"/>`;
+      } else {
+        shell = `<circle cx="${c}" cy="${c}" r="${r}" fill="${fill}" stroke="${ink}" stroke-width="${rim}"/>`;
+      }
+
+      let glyph = '';
+      if (opts.glyph !== false) {
+        const g = Math.round(size * 0.62);
+        const o = (size - g) / 2;
+        glyph = `<svg x="${o}" y="${o}" width="${g}" height="${g}" viewBox="0 0 24 24" style="color:${mark}"><use href="#g-${escapeAttr(category)}"/></svg>`;
+      }
+      return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">${shell}${glyph}</svg>`;
+    }
+
     function markerIcon(loc, highlighted) {
-      const color = CATEGORY_COLORS[loc.category] || CATEGORY_COLORS.other;
-      const size = highlighted ? 32 : 24;
-      const html = highlighted
-        ? `<div class="highlighted-marker" style="background-color: ${color}; width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.4);"></div>`
-        : `<div style="background-color: ${color}; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`;
+      const size = highlighted ? MARKER_SIZE_HI : MARKER_SIZE;
+      const showGlyph = !map || map.getZoom() >= GLYPH_MIN_ZOOM;
+      const ink = categoryInk(loc.category);
+      const html = `<div class="${highlighted ? 'highlighted-marker' : ''}" style="width:${size}px;height:${size}px;line-height:0;">` +
+        badgeHtml(loc.category, markerKind(loc), size, {
+          ink,
+          // Highlighted inverts: ink field, paper glyph.
+          fill: highlighted ? ink : '#F2EBDD',
+          mark: highlighted ? '#F2EBDD' : ink,
+          rim: highlighted ? 2.5 : 2,
+          glyph: showGlyph
+        }) + '</div>';
       return L.divIcon({
         html,
         className: '',
@@ -2028,14 +2663,28 @@
       });
     }
 
+    // Re-icons every marker when the map crosses GLYPH_MIN_ZOOM. Guarded on a
+    // state flag so an ordinary zoom tick touches nothing.
+    let lastGlyphZoomOn = null;
+    function syncMarkerGlyphZoom() {
+      if (!map) return;
+      const on = map.getZoom() >= GLYPH_MIN_ZOOM;
+      if (on === lastGlyphZoomOn) return;
+      lastGlyphZoomOn = on;
+      markersById.forEach((entry, id) => {
+        entry.marker.setIcon(markerIcon(entry.loc, id === highlightedId));
+      });
+    }
+
     function buildPopupHtml(loc) {
+      const ink = categoryInk(loc.category);
       return `
         <div style="min-width: 200px;">
-          <h3 style="margin: 0 0 8px 0; font-size: 16px; font-weight: bold;">${escapeHtml(loc.name)}</h3>
-          <p style="margin: 4px 0; font-size: 12px; color: #666;">${escapeHtml(loc.category)}</p>
-          ${loc.address ? `<p style="margin: 4px 0; font-size: 12px;">${escapeHtml(loc.address)}</p>` : ''}
-          ${loc.notes ? `<p style="margin: 8px 0 4px 0; font-size: 12px; font-style: italic;">${escapeHtml(loc.notes)}</p>` : ''}
-          ${loc.visited ? '<p style="margin: 4px 0; font-size: 12px; color: green;">✓ Visited</p>' : ''}
+          <div class="popup-title">${escapeHtml(loc.name)}</div>
+          <div class="popup-cat"><span style="color:${ink};display:flex">${glyphHtml(loc.category, 20)}</span>${escapeHtml(loc.category)}</div>
+          ${loc.address ? `<div class="popup-addr">${escapeHtml(loc.address)}</div>` : ''}
+          ${loc.notes ? `<div class="popup-notes">${escapeHtml(loc.notes)}</div>` : ''}
+          ${loc.visited ? '<div class="popup-visited">&#10003; Visited</div>' : ''}
         </div>
       `;
     }
@@ -2099,10 +2748,14 @@
       return nb.min_zoom ?? (cityConfig(nb.city).zoom + 3);
     }
 
+    // The dash patterns are the same two the district/street GLYPHS use, so
+    // the map layer and the chrome rhyme: a street is a dotted trail, a
+    // district is a tag outline -- distinguishable at a glance and in
+    // monochrome, without relying on colour.
     function neighborhoodStyle(nb) {
       return nb.type === 'street'
-        ? { color: nb.color || '#6B6A5F', weight: 6, opacity: 0.85, dashArray: '2 8', lineCap: 'round' }
-        : { color: nb.color || '#6B6A5F', weight: 2, opacity: 0.9, fillOpacity: 0.12 };
+        ? { color: nb.color || '#5A564C', weight: 6, opacity: 0.9, dashArray: '2 8', lineCap: 'round' }
+        : { color: nb.color || '#5A564C', weight: 2.5, opacity: 0.9, dashArray: '6 4', fillOpacity: 0.12 };
     }
 
     function buildNeighborhoodLayer(nb) {
@@ -2232,15 +2885,21 @@
       return el;
     }
 
+    // A ledger row, not a card: 28px glyph | 1fr content | action cluster.
+    // The category ink moved out of a 4px left border and into the glyph;
+    // the label is --ink-2 and the metadata line reads CATEGORY · CITY.
     function renderCard(el, loc) {
-      el.style.borderLeftColor = CATEGORY_COLORS[loc.category] || CATEGORY_COLORS.other;
+      const ink = categoryInk(loc.category);
+      const city = loc.city && CITIES[loc.city] ? CITIES[loc.city].label : loc.city;
       el.innerHTML = `
-        <h3>${escapeHtml(loc.name)}</h3>
-        <p>${escapeHtml(loc.category)}</p>
-        ${loc.address ? `<p>${escapeHtml(loc.address)}</p>` : ''}
+        <div class="row-badge" style="--row-ink:${ink}">${badgeHtml(loc.category, markerKind(loc), 24)}</div>
+        <div class="row-main">
+          <h3>${escapeHtml(loc.name)}</h3>
+          <div class="row-meta">${escapeHtml(loc.category)}${city ? ' &middot; ' + escapeHtml(city) : ''}</div>
+        </div>
         <div class="location-actions">
-          <button class="visit-btn ${loc.visited ? 'visited' : ''}">${loc.visited ? '✓' : '○'}</button>
-          <button class="delete-btn">×</button>
+          <button class="visit-btn ${loc.visited ? 'visited' : ''}" aria-label="Toggle visited">${loc.visited ? '&#10003;' : ''}</button>
+          <button class="delete-btn" aria-label="Delete">&times;</button>
         </div>
       `;
     }
@@ -2346,13 +3005,19 @@
       return el;
     }
 
+    // Same ledger row, but the badge is a DIAMOND -- the shape, not the
+    // colour, is what tells a district apart from a pin.
     function renderShapeCard(el, nb) {
-      el.style.borderLeftColor = nb.color || CATEGORY_COLORS[nb.type] || CATEGORY_COLORS.other;
+      const ink = nb.color || categoryInk(nb.type);
+      const city = nb.city && CITIES[nb.city] ? CITIES[nb.city].label : nb.city;
       el.innerHTML = `
-        <h3>${escapeHtml(nb.label)}</h3>
-        <p>${escapeHtml(nb.type)}</p>
+        <div class="row-badge" style="--row-ink:${ink}">${badgeHtml(nb.type, 'diamond', 24)}</div>
+        <div class="row-main">
+          <h3>${escapeHtml(nb.label)}</h3>
+          <div class="row-meta">${escapeHtml(nb.type)}${city ? ' &middot; ' + escapeHtml(city) : ''}</div>
+        </div>
         <div class="location-actions">
-          <button class="delete-btn">×</button>
+          <button class="delete-btn" aria-label="Delete">&times;</button>
         </div>
       `;
     }
@@ -2410,11 +3075,16 @@
       });
     }
 
+    // Chips are ink-on-paper with the category glyph, never white-on-category
+    // -colour (which measured 1.80:1 on the old palette). The ink arrives as
+    // --chip-ink so the `.inactive` rule can override it without !important,
+    // and ONLY the bottom rule changes between states -- contrast is constant,
+    // so all 11 stay AA whatever their ink.
     function createFilters() {
       const container = document.getElementById('filters');
       container.innerHTML = Object.keys(CATEGORY_COLORS).map(cat => `
-        <button class="filter-btn" id="filter-${cat}" style="background-color: ${CATEGORY_COLORS[cat]}; color: white;">
-          ${cat}
+        <button class="filter-btn" id="filter-${cat}" style="--chip-ink: ${CATEGORY_COLORS[cat]}">
+          <span class="chip-glyph">${glyphHtml(cat, 12)}</span>${cat}
         </button>
       `).join('');
 
@@ -2471,9 +3141,16 @@
       form.classList.toggle('show');
       btn.classList.toggle('active');
 
-      // Toggle between + and ×
-      btn.textContent = btn.classList.contains('active') ? '×' : '+';
+      setAddBtnGlyph(btn.classList.contains('active'));
     };
+
+    // The +/× glyph as SVG rather than a text character.
+    function setAddBtnGlyph(isClose) {
+      const btn = document.getElementById('floatingAddBtn');
+      btn.innerHTML = isClose
+        ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></svg>'
+        : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    }
 
     document.getElementById('toggleFiltersBtn').onclick = () => {
       const filtersPanel = document.getElementById('filtersPanel');
@@ -2620,7 +3297,7 @@
       document.getElementById('controls').classList.remove('show');
       document.getElementById('addForm').classList.remove('show');
       document.getElementById('floatingAddBtn').classList.remove('active');
-      document.getElementById('floatingAddBtn').textContent = '+';
+      setAddBtnGlyph(false);
       document.getElementById('submitBtn').textContent = 'Add Location';
       document.getElementById('submitBtn').disabled = false;
     }
@@ -2856,14 +3533,21 @@
     // city's edge, and Copenhagen/Malmö are one travel area across the Øresund.
     map = L.map('map', { minZoom: 3, worldCopyJump: true })
            .setView(CITIES[DEFAULT_CITY].center, CITIES[DEFAULT_CITY].zoom);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+    // CARTO's light basemap instead of standard OSM: OSM's default raster
+    // tiles are the single biggest pastel offender, and no amount of CSS
+    // around them fixes a minty picture. The aging filter lives on
+    // .leaflet-tile-pane ONLY (see the stylesheet) -- applying it to
+    // .leaflet-pane would sepia the markers and popups too.
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap contributors © CARTO',
+      subdomains: 'abcd',
       minZoom: 3,
       maxZoom: 19
     }).addTo(map);
 
     map.on('dragend zoomend', noteInteraction);
     map.on('zoomend', syncNeighborhoodLayers);
+    map.on('zoomend', syncMarkerGlyphZoom);
 
     // Initialize auth and set up auth state listener
     supabaseClient.auth.onAuthStateChange((event, session) => {
@@ -2896,7 +3580,10 @@
     const locationsEmptyEl = document.createElement('div');
     locationsEmptyEl.className = 'locations-empty';
     locationsEmptyEl.id = 'locationsEmpty';
-    locationsEmptyEl.textContent = 'Nothing here yet.';
+    // One of the few screens with nothing to be efficient about, so it gets
+    // the space: 48px of padding and a 28px glyph.
+    locationsEmptyEl.innerHTML =
+      '<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><use href="#g-compass"/></svg>Nothing here yet.';
     locationsEmptyEl.style.display = 'none';
     locationsListEl.appendChild(locationsEmptyEl);
     locationsListEl.appendChild(listSpacer);
@@ -2914,6 +3601,19 @@
     fetchNeighborhoodShapes();
     fetchCities();
     startPoll();
+
+    // The bottom sheet becomes a left rail at >=900px (see the media query).
+    // Leaflet has to be told its container changed size when that flips; the
+    // inline `bottom` the collapse handler writes would otherwise fight the
+    // media query, so it is cleared on the way into rail mode.
+    const railQuery = window.matchMedia('(min-width: 900px)');
+    const handleRailChange = (e) => {
+      if (e.matches) document.getElementById('mainContent').style.bottom = '';
+      setTimeout(() => map.invalidateSize(), 50);
+    };
+    if (railQuery.addEventListener) railQuery.addEventListener('change', handleRailChange);
+    else if (railQuery.addListener) railQuery.addListener(handleRailChange);
+    if (railQuery.matches) document.getElementById('mainContent').style.bottom = '';
 
     // A phone in a pocket is the dominant state of this app during a trip:
     // pause entirely while hidden, catch up immediately on return.
