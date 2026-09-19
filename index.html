@@ -694,12 +694,12 @@
   <div id="mainContent">
     <div id="controls">
       <div id="addForm">
+        <select id="cityInput"></select>
         <div id="addressInputWrapper">
           <input type="text" id="nameInput" placeholder="Search for a place..." required autocomplete="off">
           <div id="addressAutocomplete"></div>
         </div>
         <input type="text" id="addressInput" placeholder="Address" required>
-        <select id="cityInput"></select>
         <select id="categoryInput">
           <option value="restaurant">restaurant</option>
           <option value="cafe">cafe</option>
@@ -1814,6 +1814,12 @@
       if (e.key === 'Escape') {
         hideAutocomplete();
       }
+    });
+
+    // Changing the city context invalidates any autocomplete results already
+    // shown, since they were queried under the old city's countrycodes/viewbox.
+    document.getElementById('cityInput').addEventListener('change', () => {
+      hideAutocomplete();
     });
 
     document.getElementById('submitBtn').onclick = async () => {
