@@ -290,6 +290,29 @@
       margin-bottom: 0;
     }
 
+    /* One-tap confirmation for an auto-detected new city -- never a blocking
+       dialog, always dismissable, and dismissing it just falls back to
+       today's manual cityInput select (see userOverrodeCity in the script). */
+    .new-city-confirm {
+      background: #FBF3EE;
+      border: 1px solid #E8B84E;
+      border-radius: 0.5rem;
+      padding: 0.7rem 0.9rem;
+      margin-bottom: 0.9rem;
+    }
+
+    .new-city-confirm p {
+      margin: 0 0 0.6rem 0;
+      font-size: 0.85rem;
+      color: #333;
+    }
+
+    .new-city-confirm button {
+      padding: 0.45rem 0.9rem;
+      font-size: 0.85rem;
+      margin-right: 0.5rem;
+    }
+
     /* Shown under categoryInput only when a shape category (district/street)
        is selected -- see isShapeCategory() in the script. */
     .mode-toggle-hint {
@@ -814,6 +837,11 @@
           <div id="addressAutocomplete"></div>
         </div>
         <input type="text" id="addressInput" placeholder="Address" required>
+        <div id="newCityConfirm" class="new-city-confirm" style="display:none;">
+          <p id="newCityConfirmText"></p>
+          <button type="button" id="newCityConfirmAdd">Add city</button>
+          <button type="button" id="newCityConfirmDismiss" class="secondary">Not right</button>
+        </div>
         <textarea id="notesInput" placeholder="Notes (optional)" rows="2"></textarea>
         <button id="submitBtn">Add Location</button>
       </div>
@@ -1161,14 +1189,21 @@
     // (CITIES), and the geocoding context always comes from formCityId().
     // NOTE: no User-Agent header — it is a forbidden header name for fetch and
     // browsers drop it silently, so the old ones never did anything.
+    // `cfg` is usually a CITIES entry, but detectCityContext()'s "unknown
+    // region" fallback (see below) passes a partial cfg with only `viewbox`
+    // + `bounded` set. new URLSearchParams({...}) stringifies a missing
+    // field as the literal string "undefined" if it's included unconditionally
+    // -- every optional field below is therefore set only when present,
+    // never passed as an object key that might be undefined.
     async function nominatim(query, cfg, opts = {}) {
       const params = new URLSearchParams({
         format: 'json',
-        q: `${query}, ${cfg.geocodeSuffix}`,
-        limit: String(opts.limit || 1),
-        countrycodes: cfg.countrycodes,   // HARD filter — comma list, see CITIES
-        viewbox: cfg.viewbox              // SOFT ranking hint only
+        q: cfg.geocodeSuffix ? `${query}, ${cfg.geocodeSuffix}` : query,
+        limit: String(opts.limit || 1)
       });
+      if (cfg.countrycodes) params.set('countrycodes', cfg.countrycodes);   // HARD filter — comma list, see CITIES
+      if (cfg.viewbox) params.set('viewbox', cfg.viewbox);                  // SOFT ranking hint only
+      if (cfg.bounded) params.set('bounded', '1');                          // HARD filter to viewbox — only set by the unscoped-region fallback
       if (opts.addressdetails) params.set('addressdetails', '1');
       if (opts.polygonGeojson) params.set('polygon_geojson', '1');
 
@@ -1227,9 +1262,9 @@
 
     async function geocode(address) {
       try {
-        const data = await nominatim(address, cityConfig(formCityId()), { limit: 1 });
+        const data = await nominatim(address, currentSearchCityConfig(), { limit: 1, addressdetails: true });
         if (data && data.length > 0) {
-          return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+          return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon), addressDetails: data[0].address || null };
         }
         return null;
       } catch (err) {
@@ -1259,7 +1294,7 @@
       autocompleteDiv.classList.add('show');
 
       try {
-        const data = await nominatim(query, cityConfig(formCityId()), {
+        const data = await nominatim(query, currentSearchCityConfig(), {
           limit: 10,
           addressdetails: true,
           timeout: 5000
@@ -1268,7 +1303,8 @@
         if (data && data.length > 0) {
           autocompleteDiv.innerHTML = data.map(result => {
             const displayName = result.display_name;
-            return `<div class="autocomplete-item" data-lat="${result.lat}" data-lon="${result.lon}" data-name="${escapeHtml(displayName)}">${escapeHtml(displayName)}</div>`;
+            const addressDetailsJson = escapeAttr(JSON.stringify(result.address || {}));
+            return `<div class="autocomplete-item" data-lat="${result.lat}" data-lon="${result.lon}" data-name="${escapeHtml(displayName)}" data-address-details="${addressDetailsJson}">${escapeHtml(displayName)}</div>`;
           }).join('');
 
           // Add click handlers to autocomplete items
@@ -1314,6 +1350,12 @@
         ? { address: displayName, lat, lng }
         : null;
 
+      if (selectedPlace) {
+        let addressDetails = null;
+        try { addressDetails = JSON.parse(item.getAttribute('data-address-details') || 'null'); } catch (e) { /* ignore */ }
+        maybeDetectCity(lat, lng, addressDetails);
+      }
+
       hideAutocomplete();
     }
 
@@ -1329,6 +1371,14 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // escapeHtml() is safe for text NODES but not for double-quoted attribute
+    // VALUES -- it never escapes `"`, so a JSON blob (which is full of them)
+    // embedded via escapeHtml() would break out of the attribute early. Used
+    // only for the data-address-details payload stashed on autocomplete rows.
+    function escapeAttr(text) {
+      return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
     }
     
     // =========================================================================
@@ -1484,13 +1534,226 @@
         .sort((a, b) => a.km - b.km);
     }
 
+    // ---- automatic city detection (Phase 4) ----------------------------------
+
+    // Scopes a Nominatim search BEFORE any result exists. The common case
+    // (map already framed on a known city) reproduces today's manually-picked
+    // countrycodes/viewbox exactly -- zero regression risk. Only when the
+    // viewport isn't near any known city does this fall back to a hard,
+    // viewport-bounded search (bounded=1) instead of an unscoped global one --
+    // an unscoped search is exactly the failure shape that mismatched "V1
+    // Gallery" to Copenhagen Central Station earlier in this project.
+    function detectCityContext() {
+      const c = map.getCenter();
+      const ranked = rankCitiesByProximity([c.lat, c.lng], 75);
+      if (ranked.length) {
+        const cityId = ranked[0].cityId;
+        return { cityId, cfg: cityConfig(cityId), known: true };
+      }
+      const b = map.getBounds().pad(0.25);
+      return {
+        cityId: null,
+        cfg: { viewbox: `${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}`, bounded: true },
+        known: false
+      };
+    }
+
+    // The scoping context every search actually uses: detectCityContext()'s
+    // live viewport guess before the user has taken control, or their
+    // settled/overridden cityInput value once they have (userOverrodeCity) --
+    // otherwise a manual correction would get silently re-guessed away on
+    // the very next keystroke.
+    function currentSearchCityConfig() {
+      if (userOverrodeCity) return cityConfig(formCityId());
+      const ctx = detectCityContext();
+      if (ctx.known && ctx.cityId !== formCityId()) {
+        document.getElementById('cityInput').value = ctx.cityId;
+        updateCityCategorySummary();
+      }
+      return ctx.cfg;
+    }
+
+    function pointInViewbox(lat, lng, viewboxStr, padDeg = 0) {
+      const [lonMin, latMin, lonMax, latMax] = viewboxStr.split(',').map(Number);
+      return lng >= lonMin - padDeg && lng <= lonMax + padDeg
+          && lat >= latMin - padDeg && lat <= latMax + padDeg;
+    }
+
+    // Classifies a geocoded point against the EXISTING CITIES set, by
+    // bounding-box containment only -- not address text. Copenhagen/Malmö
+    // are deliberately configured with overlapping countrycodes ('dk,se' /
+    // 'se,dk') for the cross-border travel area, so country alone can't tell
+    // them apart; their viewboxes are disjoint by ~12-13km (the Øresund),
+    // so containment does. Returns null when no existing city matches --
+    // the caller's cue to consider a new-city candidate.
+    function matchCity(lat, lng) {
+      let hits = Object.keys(CITIES).filter(id => pointInViewbox(lat, lng, CITIES[id].viewbox, 0));
+      if (hits.length === 0) hits = Object.keys(CITIES).filter(id => pointInViewbox(lat, lng, CITIES[id].viewbox, 0.05));
+      if (hits.length === 0) return null;
+      if (hits.length === 1) return hits[0];
+      return hits.sort((a, b) =>
+        haversineKm([lat, lng], CITIES[a].center) - haversineKm([lat, lng], CITIES[b].center)
+      )[0];
+    }
+
+    function slugifyCityId(label) {
+      return label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+
+    // Two-lookup derivation, not a one-shot guess from the single POI point:
+    // re-geocodes the SETTLEMENT itself so the resulting viewbox is sized
+    // like the five hand-authored CITIES boxes, not an invented box around
+    // one restaurant. Refuses (returns null) rather than guesses when the
+    // input data is too thin to be confident -- routes the caller back to
+    // the manual cityInput select instead.
+    async function deriveNewCityConfig(addressDetails, poiLat, poiLng) {
+      const label = addressDetails && (addressDetails.city || addressDetails.town || addressDetails.village);
+      const countryCode = addressDetails && addressDetails.country_code;
+      if (!label || !countryCode) return null;
+
+      let id = slugifyCityId(label);
+      if (CITIES[id]) id = `${id}-${countryCode}`;
+
+      let center = [poiLat, poiLng];
+      let viewbox = null;
+      try {
+        const data = await nominatim(label, { countrycodes: countryCode }, { limit: 1, addressdetails: true, timeout: 8000 });
+        if (data && data.length && data[0].boundingbox) {
+          const bbox = data[0].boundingbox.map(Number);   // Nominatim order: [south, north, west, east]
+          const lonMin = bbox[2], lonMax = bbox[3], latMin = bbox[0], latMax = bbox[1];
+          // Sanity guard: wider/taller than ~3 degrees means the settlement
+          // lookup likely resolved to a region/country, not a city -- don't
+          // trust it.
+          if (lonMax - lonMin <= 3 && latMax - latMin <= 3) {
+            viewbox = `${lonMin},${latMin},${lonMax},${latMax}`;
+            center = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+          }
+        }
+      } catch (err) { /* falls through to the fixed-box fallback below */ }
+
+      const lowConfidence = !viewbox;
+      if (!viewbox) {
+        // Settlement lookup failed, returned nothing usable, or failed the
+        // sanity guard -- fall back to a fixed, generous box centered on the
+        // original point rather than inventing nothing at all.
+        viewbox = `${poiLng - 0.15},${poiLat - 0.15},${poiLng + 0.15},${poiLat + 0.15}`;
+      }
+
+      return {
+        id, label, center, zoom: 12,
+        geocodeSuffix: `${label}, ${addressDetails.country || countryCode}`,
+        countrycodes: countryCode,
+        viewbox,
+        lowConfidence
+      };
+    }
+
+    function mergeCityIntoRuntime(cfg) {
+      CITIES[cfg.id] = {
+        label: cfg.label, center: cfg.center, zoom: cfg.zoom,
+        geocodeSuffix: cfg.geocodeSuffix, countrycodes: cfg.countrycodes, viewbox: cfg.viewbox
+      };
+      populateCityInput();
+      createCitySelector();
+      updateCitySelectorUI();   // createCitySelector() rebuilds from scratch -- reapply the active highlight
+    }
+
+    async function addCity(cfg) {
+      if (!await requireAuth()) return false;
+      try {
+        const { error } = await supabaseClient.from('cities').insert([{
+          id: cfg.id,
+          label: cfg.label,
+          center_lat: cfg.center[0],
+          center_lng: cfg.center[1],
+          zoom: cfg.zoom,
+          geocode_suffix: cfg.geocodeSuffix,
+          countrycodes: cfg.countrycodes,
+          viewbox: cfg.viewbox,
+          auto_added: true,
+          created_by: currentUser ? currentUser.email : null
+        }]);
+        if (error) throw error;
+        mergeCityIntoRuntime(cfg);
+        return true;
+      } catch (err) {
+        showError(handleRLSError(err, 'add'));
+        return false;
+      }
+    }
+
+    // Fetches the live cities table and merges it into CITIES (never
+    // replaces it) -- the static object stays as an offline-safe bootstrap
+    // seed the map can draw from before this fetch ever resolves. On
+    // failure, degrades to exactly the 5 static cities, same posture as
+    // doFetchLocations()/fetchNeighborhoodShapes().
+    async function fetchCities() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('cities')
+          .select('id,label,center_lat,center_lng,zoom,geocode_suffix,countrycodes,viewbox');
+        if (error) throw error;
+        (data || []).forEach(row => {
+          CITIES[row.id] = {
+            label: row.label, center: [row.center_lat, row.center_lng], zoom: row.zoom,
+            geocodeSuffix: row.geocode_suffix, countrycodes: row.countrycodes, viewbox: row.viewbox
+          };
+        });
+        populateCityInput();
+        createCitySelector();
+        updateCitySelectorUI();
+      } catch (err) {
+        showError(`Failed to load cities: ${err.message}`);
+      }
+    }
+
+    // ---- add-form city detection state ---------------------------------------
+    let pendingNewCity = null;
+    let userOverrodeCity = false;   // a manual cityInput pick stops further auto-guessing this form session
+
+    async function maybeDetectCity(lat, lng, addressDetails) {
+      if (userOverrodeCity) return;
+      const matched = matchCity(lat, lng);
+      if (matched) {
+        document.getElementById('cityInput').value = matched;
+        updateCityCategorySummary();
+        hideNewCityConfirm();
+        return;
+      }
+      if (!addressDetails) return;   // not enough signal to consider a new city
+      const derived = await deriveNewCityConfig(addressDetails, lat, lng);
+      if (!derived || userOverrodeCity) return;   // re-check: user may have acted while the derivation was in flight
+      showNewCityConfirm(derived);
+    }
+
+    function showNewCityConfirm(cfg) {
+      pendingNewCity = cfg;
+      document.getElementById('newCityConfirmText').textContent =
+        `"${cfg.label}" isn't in your city list yet. Add it?`;
+      document.getElementById('newCityConfirm').style.display = '';
+    }
+
+    function hideNewCityConfirm() {
+      pendingNewCity = null;
+      document.getElementById('newCityConfirm').style.display = 'none';
+    }
+
     // ---- add-form city -------------------------------------------------------
 
+    // Rebuilding innerHTML on a <select> silently resets its selected value
+    // to whatever option is now first -- a real problem once this can be
+    // called mid-session (fetchCities() resolving after boot, a new city
+    // being merged in) rather than only once at cold start. Preserve
+    // whatever was selected, when it still exists after the rebuild.
     function populateCityInput() {
-      document.getElementById('cityInput').innerHTML =
+      const select = document.getElementById('cityInput');
+      const previous = select.value;
+      select.innerHTML =
         Object.entries(CITIES)
           .map(([id, c]) => `<option value="${id}">${escapeHtml(c.label)}</option>`)
           .join('');
+      if (previous && CITIES[previous]) select.value = previous;
     }
 
     // The single source of truth for geocoding context and for the inserted row.
@@ -2074,9 +2337,29 @@
     // Changing the city context invalidates any autocomplete results already
     // shown, since they were queried under the old city's countrycodes/viewbox.
     document.getElementById('cityInput').addEventListener('change', () => {
+      userOverrodeCity = true;   // a real user tap, never a programmatic .value set -- see maybeDetectCity()
       hideAutocomplete();
       updateCityCategorySummary();
     });
+
+    document.getElementById('newCityConfirmAdd').onclick = async () => {
+      if (!pendingNewCity) return;
+      const cfg = pendingNewCity;
+      const btn = document.getElementById('newCityConfirmAdd');
+      btn.disabled = true;
+      const ok = await addCity(cfg);
+      btn.disabled = false;
+      if (ok) {
+        document.getElementById('cityInput').value = cfg.id;
+        updateCityCategorySummary();
+      }
+      hideNewCityConfirm();
+    };
+
+    document.getElementById('newCityConfirmDismiss').onclick = () => {
+      userOverrodeCity = true;   // stop re-guessing; the manual select is the fallback from here
+      hideNewCityConfirm();
+    };
 
     // A category IS the mode: 'district'/'street' mean "fetch an OSM shape,"
     // every other category means "a normal pin." One dropdown drives both
@@ -2100,6 +2383,8 @@
 
     function closeAddForm() {
       selectedPlace = null;
+      userOverrodeCity = false;
+      hideNewCityConfirm();
       document.getElementById('nameInput').value = '';
       document.getElementById('addressInput').value = '';
       document.getElementById('notesInput').value = '';
@@ -2161,7 +2446,6 @@
       const address = document.getElementById('addressInput').value;
       const category = document.getElementById('categoryInput').value;
       const notes = document.getElementById('notesInput').value;
-      const city = formCityId();   // the form, never activeCity, is the source of truth
 
       if (!name || !address) {
         alert('Please provide name and address');
@@ -2172,9 +2456,11 @@
       document.getElementById('submitBtn').textContent = 'Adding...';
       document.getElementById('submitBtn').disabled = true;
 
-      // An address picked from autocomplete is already geocoded — re-geocoding
-      // a full Nominatim display_name is a wasted (and worse) round trip.
-      const coords = (selectedPlace && selectedPlace.address === address)
+      // An address picked from autocomplete is already geocoded (and already
+      // ran through maybeDetectCity() in selectAddress()) — re-geocoding a
+      // full Nominatim display_name is a wasted (and worse) round trip.
+      const alreadySelected = selectedPlace && selectedPlace.address === address;
+      const coords = alreadySelected
         ? { lat: selectedPlace.lat, lng: selectedPlace.lng }
         : await geocode(address);
 
@@ -2184,6 +2470,25 @@
         document.getElementById('submitBtn').disabled = false;
         return;
       }
+
+      // Freeform-typed-and-submitted path never went through selectAddress()'s
+      // detection -- this is that path's one chance, right before insert.
+      if (!alreadySelected && coords.addressDetails) {
+        await maybeDetectCity(coords.lat, coords.lng, coords.addressDetails);
+      }
+
+      // Covers BOTH paths: an autocomplete pick may have left a new-city
+      // prompt showing (selectAddress() doesn't block on it), and the
+      // freeform path may have just raised one above. Either way, inserting
+      // under the old cityInput value right now would silently use the
+      // wrong city -- stop and let the user resolve the prompt, then submit
+      // again (Add City just updates cityInput, it doesn't reopen the form).
+      if (pendingNewCity) {
+        document.getElementById('submitBtn').textContent = 'Add Location';
+        document.getElementById('submitBtn').disabled = false;
+        return;
+      }
+      const city = formCityId();   // read AFTER detection may have updated cityInput
 
       await addLocation({
         name,
@@ -2268,6 +2573,7 @@
 
     fetchLocations();
     fetchNeighborhoodShapes();
+    fetchCities();
     startPoll();
 
     // A phone in a pocket is the dominant state of this app during a trip:
