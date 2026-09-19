@@ -76,11 +76,74 @@
 
 <script>
 const CITIES = {
-  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland',   bbox: [63.900,-22.700,64.300,-21.200] },
-  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København', bbox: [55.610,12.450,55.750,12.700] },
-  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö',      bbox: [55.530,12.900,55.650,13.120] },
-  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm',  bbox: [59.250,17.850,59.420,18.220] }
+  reykjavik:  { countrycodes: 'is',    viewbox: '-22.700,63.900,-21.200,64.300', suffix: 'Iceland',   bbox: [63.900,-22.700,64.300,-21.200], center: [64.100,-21.950] },
+  copenhagen: { countrycodes: 'dk,se', viewbox: '12.450,55.610,12.700,55.750',   suffix: 'København', bbox: [55.610,12.450,55.750,12.700],   center: [55.680,12.575] },
+  malmo:      { countrycodes: 'se,dk', viewbox: '12.900,55.530,13.120,55.650',   suffix: 'Malmö',      bbox: [55.530,12.900,55.650,13.120],   center: [55.590,13.010] },
+  stockholm:  { countrycodes: 'se',    viewbox: '17.850,59.250,18.220,59.420',   suffix: 'Stockholm',  bbox: [59.250,17.850,59.420,18.220],   center: [59.335,18.035] }
 };
+
+// Sanity check that a fetched shape's geometry actually landed in the city it was
+// filed under -- ported from index.html's matchCity/resolveShapeCity (that file's
+// live-add-form version; this is the same algorithm adapted to this tool's simpler
+// CITIES shape and its offline/human-review workflow instead of a live Supabase write).
+function haversineKm(a, b) {
+  const R = 6371;
+  const dLat = (b[0] - a[0]) * Math.PI / 180;
+  const dLng = (b[1] - a[1]) * Math.PI / 180;
+  const lat1 = a[0] * Math.PI / 180, lat2 = b[0] * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+function pointInViewbox(lat, lng, viewboxStr, padDeg = 0) {
+  const [lonMin, latMin, lonMax, latMax] = viewboxStr.split(',').map(Number);
+  return lng >= lonMin - padDeg && lng <= lonMax + padDeg
+      && lat >= latMin - padDeg && lat <= latMax + padDeg;
+}
+
+function matchCity(lat, lng) {
+  let hits = Object.keys(CITIES).filter(id => pointInViewbox(lat, lng, CITIES[id].viewbox, 0));
+  if (hits.length === 0) hits = Object.keys(CITIES).filter(id => pointInViewbox(lat, lng, CITIES[id].viewbox, 0.05));
+  if (hits.length === 0) return null;
+  if (hits.length === 1) return hits[0];
+  return hits.sort((a, b) =>
+    haversineKm([lat, lng], CITIES[a].center) - haversineKm([lat, lng], CITIES[b].center)
+  )[0];
+}
+
+const SHAPE_CITY_CONFIDENT_SHARE = 0.6;
+
+// segmentLengths is per-OSM-element point counts (see fetchStreetWay); districts have
+// a single ring so it's omitted there and treated as one segment covering all points.
+function resolveShapeCity(geometry, segmentLengths) {
+  const lengths = segmentLengths && segmentLengths.length ? segmentLengths : [geometry.length];
+  let offset = 0;
+  const segments = lengths.map(len => {
+    const pts = geometry.slice(offset, offset + len);
+    offset += len;
+    const votes = {};
+    pts.forEach(([lat, lng]) => {
+      const city = matchCity(lat, lng);
+      if (city) votes[city] = (votes[city] || 0) + 1;
+    });
+    const winner = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0] || null;
+    return { pts, winner };
+  });
+
+  const tally = {};
+  segments.forEach(seg => { if (seg.winner) tally[seg.winner] = (tally[seg.winner] || 0) + seg.pts.length; });
+  const ranked = Object.keys(tally).sort((a, b) => tally[b] - tally[a]);
+  const winner = ranked[0] || null;
+  const winnerShare = winner ? tally[winner] / geometry.length : 0;
+  const runnerUp = ranked[1] || null;
+
+  const keptSegments = winner ? segments.filter(seg => seg.winner === winner) : segments;
+  const cleanedGeometry = keptSegments.length ? [].concat(...keptSegments.map(s => s.pts)) : geometry;
+  const droppedPoints = geometry.length - cleanedGeometry.length;
+
+  return { winner, winnerShare, runnerUp, cleanedGeometry, droppedPoints,
+           confident: !!winner && winnerShare >= SHAPE_CITY_CONFIDENT_SHARE };
+}
 
 // From the plan doc's §11 checklist. queryName is what we search OSM for;
 // it's usually the same as label but can be tuned separately.
@@ -138,13 +201,18 @@ async function fetchStreetWay(shape, cfg) {
   if (!data.elements || !data.elements.length) return null;
   // A named street is often split into several OSM ways (segments) -- merge all
   // segments' points into one path. Overpass geometry nodes are {lat, lon} already,
-  // so no coordinate-order conversion is needed here.
+  // so no coordinate-order conversion is needed here. segmentLengths tracks each
+  // element's point count (in order) so resolveShapeCity() can tell which segment(s)
+  // an outlier city match came from and drop just those points -- this is what
+  // catches an Overpass query merging in an unrelated way sharing the street name.
   const points = [];
+  const segmentLengths = [];
   data.elements.forEach(el => {
-    if (!el.geometry) return;
+    if (!el.geometry) { segmentLengths.push(0); return; }
+    segmentLengths.push(el.geometry.length);
     el.geometry.forEach(pt => points.push([pt.lat, pt.lon]));
   });
-  return points.length ? points : null;
+  return points.length ? { points, segmentLengths } : null;
 }
 
 function centroidOf(points) {
@@ -168,7 +236,7 @@ function renderPreview(container, shape, geometry) {
   }, 0);
 }
 
-function renderCard(shape, geometry, idx) {
+function renderCard(shape, geometry, idx, resolved) {
   const card = document.createElement('div');
   card.className = 'card' + (geometry ? ' ok' : ' needs-trace');
   card.dataset.idx = idx;
@@ -187,6 +255,29 @@ function renderCard(shape, geometry, idx) {
     status.className = 'status ok';
     status.textContent = `✓ Found ${geometry.length} points from ${shape.type === 'street' ? 'Overpass (OSM way)' : 'Nominatim (OSM boundary)'}`;
     card.appendChild(status);
+
+    if (resolved && resolved.droppedPoints > 0) {
+      const warn = document.createElement('div');
+      warn.className = 'status warn';
+      warn.textContent = `⚠ ${resolved.droppedPoints} outlier point(s) dropped — merged an unrelated OSM way`;
+      card.appendChild(warn);
+    }
+    if (resolved && !resolved.confident) {
+      const warn = document.createElement('div');
+      warn.className = 'status warn';
+      const pct = Math.round(resolved.winnerShare * 100);
+      warn.textContent = resolved.winner
+        ? `⚠ low-confidence city match — only ${pct}% of points fall in "${resolved.winner}"`
+        : `⚠ no known city's viewbox matches this geometry at all`;
+      card.appendChild(warn);
+    }
+    if (resolved && resolved.winner && resolved.winner !== shape.city) {
+      const warn = document.createElement('div');
+      warn.className = 'status warn';
+      warn.textContent = `⚠ geometry suggests "${resolved.winner}", not "${shape.city}" — review before accepting`;
+      card.appendChild(warn);
+    }
+
     renderPreview(card, shape, geometry);
   } else {
     status.className = 'status warn';
@@ -219,17 +310,29 @@ document.getElementById('startBtn').onclick = async () => {
     document.getElementById('progress').textContent = `${i + 1} / ${SHAPES.length} — ${shape.label}`;
 
     let geometry = null;
+    let segmentLengths = null;
     try {
-      geometry = shape.type === 'street'
-        ? await fetchStreetWay(shape, cfg)
-        : await fetchDistrictPolygon(shape, cfg);
+      if (shape.type === 'street') {
+        const result = await fetchStreetWay(shape, cfg);
+        geometry = result ? result.points : null;
+        segmentLengths = result ? result.segmentLengths : null;
+      } else {
+        geometry = await fetchDistrictPolygon(shape, cfg);
+      }
     } catch (e) {
       geometry = null;
+      segmentLengths = null;
+    }
+
+    let resolved = null;
+    if (geometry) {
+      resolved = resolveShapeCity(geometry, segmentLengths);
+      geometry = resolved.cleanedGeometry;
     }
 
     if (geometry) okCount++; else missCount++;
-    results[i] = { shape, geometry };
-    cardsEl.appendChild(renderCard(shape, geometry, i));
+    results[i] = { shape, geometry, resolved };
+    cardsEl.appendChild(renderCard(shape, geometry, i, resolved));
     document.getElementById('genBtn').style.display = 'inline-block';
     await sleep(1500);
   }
@@ -303,10 +406,24 @@ document.getElementById('adhocFetchBtn').onclick = async () => {
   btn.textContent = 'Fetching…';
 
   let geometry = null;
+  let segmentLengths = null;
   try {
-    geometry = type === 'street' ? await fetchStreetWay(shape, cfg) : await fetchDistrictPolygon(shape, cfg);
+    if (type === 'street') {
+      const result = await fetchStreetWay(shape, cfg);
+      geometry = result ? result.points : null;
+      segmentLengths = result ? result.segmentLengths : null;
+    } else {
+      geometry = await fetchDistrictPolygon(shape, cfg);
+    }
   } catch (e) {
     geometry = null;
+    segmentLengths = null;
+  }
+
+  let resolved = null;
+  if (geometry) {
+    resolved = resolveShapeCity(geometry, segmentLengths);
+    geometry = resolved.cleanedGeometry;
   }
 
   btn.disabled = false;
@@ -314,8 +431,8 @@ document.getElementById('adhocFetchBtn').onclick = async () => {
 
   window._triplet_shapes = window._triplet_shapes || [];
   const idx = window._triplet_shapes.length;
-  window._triplet_shapes.push({ shape, geometry });
-  document.getElementById('cards').appendChild(renderCard(shape, geometry, idx));
+  window._triplet_shapes.push({ shape, geometry, resolved });
+  document.getElementById('cards').appendChild(renderCard(shape, geometry, idx, resolved));
   document.getElementById('genBtn').style.display = 'inline-block';
   generateCode();
 
